@@ -4,7 +4,11 @@ import { tools } from "../tools/index.js";
 import type { ToolContext } from "../tools/types.js";
 import type { NotiConfig } from "../config.js";
 
-export async function startMcpServer(config: NotiConfig): Promise<void> {
+/**
+ * Build a fully-wired McpServer (all tools registered) without binding it to a
+ * transport. Reused by both the stdio and HTTP entry points.
+ */
+export function buildMcpServer(config: NotiConfig): McpServer {
   const ctx: ToolContext = {
     workspace: config.workspace,
     allowShell: config.allowShell,
@@ -38,8 +42,13 @@ export async function startMcpServer(config: NotiConfig): Promise<void> {
     );
   }
 
+  return server;
+}
+
+export async function startMcpServer(config: NotiConfig): Promise<void> {
+  const server = buildMcpServer(config);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Log to stderr: stdout is reserved for the MCP protocol stream.
-  process.stderr.write(`NotiCode MCP server running on stdio · workspace: ${config.workspace}\n`);
+  process.stderr.write(`NotiCode MCP server running on stdio \u00b7 workspace: ${config.workspace}\n`);
 }
