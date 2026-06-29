@@ -7,6 +7,8 @@ export interface ToolContext {
   maxOutputChars: number;
   telegramToken?: string;
   telegramChatId?: string;
+  homeAssistantUrl?: string;
+  homeAssistantToken?: string;
 }
 
 export interface NotiTool {
