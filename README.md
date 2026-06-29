@@ -1,45 +1,49 @@
 
 # NotiCode
 
-**The blue, MCP-native coding agent.**
+**The blue, MCP-native AI agent for your whole machine.**
 
-Runs as an MCP server so Claude (or any MCP client) can plug in, chat, and let it edit files and drive your whole machine. Or DM it on Telegram and let it work while you're away from your desk.
-
- 
+Runs as an MCP server so Claude (or any MCP client) can plug in, chat, and let it edit files and drive your machine. DM it on Telegram. Or run **everything at once** and control one shared agent from your MCP client *and* your phone.
 
 ---
 
 ## What is this?
 
-NotiCode is an open AI coding agent in the spirit of OpenCode and Claude Code, with one twist: **it speaks [MCP](https://modelcontextprotocol.io) first.**
+NotiCode is an open AI agent in the spirit of OpenCode and Claude Code, with one twist: **it speaks [MCP](https://modelcontextprotocol.io) first.**
 
-Launch it and it boots a Model Context Protocol server. Point Claude Desktop, Cursor, or any MCP-compatible client at it, and your assistant suddenly gains hands: it can read and write files, run shell commands, and inspect your system. Prefer a standalone experience? Run the built-in terminal chat agent and talk to NotiCode directly, or run it as a **Telegram bot** and message it from your phone.
+It has hands. It can read/write files, run shell commands, inspect your system, **drive a headless browser**, **take screenshots and webcam photos**, **control your Home Assistant smart home**, **schedule recurring jobs**, and **message you on Telegram** (text and photos). Connect it to an MCP client, talk to it in your terminal, or DM the Telegram bot, all backed by the same toolset.
 
 It is blue. Not orange. On purpose.
 
+## The one-command setup: `all`
+
+```bash
+node dist/index.js all
+# or: npm run all
+```
+
+This boots **everything in a single process**:
+
+- the **HTTP MCP server** (prints a URL you paste into any MCP client),
+- the **Telegram bot** (DM it from your phone),
+- the **scheduler** (cron jobs that notify you when done).
+
+They all share the same tools and workspace. So you can text the bot "измени мои файлы" / "edit my files and run the tests", *or* type the same thing into an MCP client, and the same agent does the work on the same machine. Needs `ANTHROPIC_API_KEY` (for the bot) and `TELEGRAM_BOT_TOKEN` (to enable Telegram); the HTTP server and scheduler run even without them.
+
 ## Do I need an API key?
 
-**Only for `chat` and `telegram` modes.** Here's the split:
+- `noticode mcp` / `noticode serve` -- **no key.** NotiCode is just the *hands*; the MCP client you connect brings the *brain*.
+- `noticode chat` / `noticode telegram` / `noticode all` -- needs `ANTHROPIC_API_KEY`, because here NotiCode calls the model itself.
 
-- `noticode mcp` / `noticode serve` -- **no key needed.** NotiCode is just the *hands*. The MCP client you connect (Claude, Cursor, ...) is the *brain* and brings its own model. NotiCode never calls an LLM itself in these modes.
-- `noticode chat` / `noticode telegram` -- needs `ANTHROPIC_API_KEY`, because here NotiCode *is* the brain and calls Anthropic directly.
+## Modes
 
-So if your goal is "start it, get a URL, paste it into an AI chat, let it control my PC" -- use `serve`. No key.
-
-## Features
-
-- **MCP server out of the box** -- one command exposes a full toolset over stdio or HTTP.
-- **Connect by URL** -- `noticode serve` prints a server URL you paste straight into an MCP client.
-- **Telegram bot** -- `noticode telegram` turns NotiCode into a bot you can DM. The model replies and drives your machine, so you can kick off work from your phone.
-- **Real machine access** -- read/write/edit files, glob search, run any shell command, query system info.
-- **Four ways to run it:**
-  - `noticode mcp` -- serve tools to Claude and friends over stdio.
-  - `noticode serve` -- serve tools over HTTP and print a connectable URL.
-  - `noticode chat` -- an interactive agent loop in your terminal, powered by Claude.
-  - `noticode telegram` -- a Telegram bot bridge to the same agent loop.
-- **Workspace-scoped** -- operations are rooted at a workspace you choose.
-- **Safety switches** -- disable writes or shell execution with one env var, gate the HTTP endpoint with a token, or lock the bot to a single chat.
-- **Tiny + hackable** -- TypeScript, a clean tool registry, no framework lock-in.
+| Command | What it does | Needs key? |
+| --- | --- | --- |
+| `all` | HTTP MCP + Telegram bot + scheduler, one process, shared agent. | Yes (for bot) |
+| `mcp` | MCP server over stdio (connect Claude Desktop). | No |
+| `serve` | MCP server over HTTP, prints a connectable URL. | No |
+| `chat` | Interactive terminal agent. | Yes |
+| `telegram` | Telegram bot only. | Yes |
 
 ## Quick start
 
@@ -47,23 +51,20 @@ So if your goal is "start it, get a URL, paste it into an AI chat, let it contro
 git clone https://github.com/Antropov31/noticode-mcp.git
 cd noticode-mcp
 npm install
+npx playwright install chromium   # only if you want the browser_* tools
 npm run build
+cp .env.example .env               # fill in keys you want to use
 ```
 
-Copy the env template (only needed if you want to tweak defaults or use `chat` / `telegram`):
+Then pick a mode, e.g. the full stack:
 
 ```bash
-cp .env.example .env
+npm run all
 ```
 
-### Mode 1 -- MCP server over stdio (connect Claude Desktop)
+### Connect Claude Desktop (stdio)
 
-```bash
-node dist/index.js mcp
-# or: npm run mcp
-```
-
-Register it with your MCP client. For **Claude Desktop**, add this to `claude_desktop_config.json`:
+Add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -71,144 +72,108 @@ Register it with your MCP client. For **Claude Desktop**, add this to `claude_de
     "noticode": {
       "command": "node",
       "args": ["/absolute/path/to/noticode-mcp/dist/index.js", "mcp"],
-      "env": {
-        "NOTICODE_WORKSPACE": "/absolute/path/to/your/project"
-      }
+      "env": { "NOTICODE_WORKSPACE": "/absolute/path/to/your/project" }
     }
   }
 }
 ```
 
-Restart Claude, and NotiCode's tools show up. No API key required.
+### Connect by URL (HTTP)
 
-### Mode 2 -- MCP server over HTTP (connect by URL)
+`npm run serve` (or `all`) prints something like `http://127.0.0.1:4319/mcp`. Paste it into any MCP client that supports the HTTP (Streamable HTTP) transport.
 
-This is the "start it, get a URL, paste into a chat" flow. **No API key needed.**
+### Telegram
 
-```bash
-node dist/index.js serve
-# or: npm run serve
-```
-
-You'll see something like:
-
-```
-  ▸█ NotiCode
-  the blue coding agent · MCP-native
-
-  MCP server URL  http://127.0.0.1:4319/mcp
-  workspace: /home/you/project
-  auth: none · bound to 127.0.0.1
-  Paste this URL into your MCP client (HTTP transport) and it gets hands on this machine.
-```
-
-Paste that URL into any MCP client that supports the **HTTP (Streamable HTTP) transport** (e.g. Cursor, Cline, or Claude via a custom connector). The assistant connects and can now act on your machine through NotiCode.
-
-Knobs (env or `.env`):
-
-- `NOTICODE_HOST` -- host to bind (default `127.0.0.1`, localhost only).
-- `NOTICODE_PORT` -- port (default `4319`).
-- `NOTICODE_TOKEN` -- set it to require `Authorization: Bearer <token>` on every request.
-
-> Want a client on another machine to reach it? Keep the bind on localhost and put a tunnel in front (e.g. `cloudflared` or `ngrok`), and set `NOTICODE_TOKEN` so it isn't wide open. Exposing raw shell access on a public URL with no token is asking for trouble.
-
-### Mode 3 -- Terminal chat agent
-
-```bash
-node dist/index.js chat
-# or: npm run chat
-```
-
-This mode talks to the model itself, so it needs `ANTHROPIC_API_KEY` in your `.env`. It plans, calls its own tools, and reports back.
-
-```
-  ▸█ NotiCode
-  the blue coding agent · MCP-native
-
-you › create a python script that prints the fibonacci sequence and run it
-noti › Done. Wrote fib.py and ran it -- output: 0 1 1 2 3 5 8 13 21 34
-```
-
-### Mode 4 -- Telegram bot
-
-DM NotiCode from your phone and let it work on the machine it's running on. Needs `ANTHROPIC_API_KEY` and `TELEGRAM_BOT_TOKEN`.
-
-1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token into `TELEGRAM_BOT_TOKEN`.
-2. (Recommended) Message [@userinfobot](https://t.me/userinfobot) to get your chat ID, and set `TELEGRAM_CHAT_ID` to lock the bot to just you.
-3. Run it:
-
-```bash
-node dist/index.js telegram
-# or: npm run telegram
-```
-
-Now text your bot. Every message runs through the same agent loop as `chat`, so it can read/write files and run commands, then reply in the thread. Commands: `/start` (intro) and `/reset` (clear the conversation context).
-
-> Heads up: the bot has the same machine access as every other mode. Always set `TELEGRAM_CHAT_ID` so only you can drive it, and lean on `NOTICODE_ALLOW_SHELL` / `NOTICODE_ALLOW_WRITE` if you want to limit what it can do.
+1. Create a bot with [@BotFather](https://t.me/BotFather), put the token in `TELEGRAM_BOT_TOKEN`.
+2. (Recommended) Get your chat ID from [@userinfobot](https://t.me/userinfobot) and set `TELEGRAM_CHAT_ID` to lock the bot to just you.
+3. `npm run telegram` (or `npm run all`). Text the bot. `/start` and `/reset` are supported.
 
 ## Tools
 
 | Tool | What it does |
 | --- | --- |
-| `fs_read` | Read a text file, optionally a line range. |
-| `fs_write` | Create or overwrite a file (makes parent dirs). |
-| `fs_edit` | Exact-match string replacement inside a file. |
-| `fs_list` | List files and directories under a path. |
-| `fs_search` | Glob for files, optionally grep their contents. |
+| `fs_read` / `fs_write` / `fs_edit` | Read, create/overwrite, exact-match edit files. |
+| `fs_list` / `fs_search` | List dirs; glob + grep file contents. |
 | `shell_exec` | Run any shell command on the host. |
 | `sys_info` | OS, CPU, memory, user, workspace. |
-| `tg_send` | Send a message to the user on Telegram. |
-| `tg_read` | Read recent incoming Telegram messages. |
+| `tg_send` / `tg_send_photo` / `tg_read` | Message the user on Telegram (text/photo), read incoming messages. |
+| `notify` | Send a task/event notification (via Telegram, or logged). |
+| `ha_states` / `ha_call_service` | List Home Assistant entities; control devices and scenes. |
+| `browser_navigate` / `browser_click` / `browser_type` / `browser_eval` / `browser_screenshot` | Drive a headless Playwright browser. |
+| `screen_capture` / `webcam_capture` | Screenshot the desktop / snap a webcam photo (saved as PNG). |
+| `schedule_add` / `schedule_list` / `schedule_cancel` | Cron jobs that run a command, an agent prompt, or a reminder. |
 
-All tools are defined once in `src/tools/` and shared by the stdio server, the HTTP server, the chat agent, and the Telegram bot. Adding a tool is a few lines. The `tg_*` tools work in any mode (including `mcp` / `serve`) as long as `TELEGRAM_BOT_TOKEN` is set -- handy for letting a connected MCP client ping you on Telegram.
+Image tools save a PNG and return its path; send it on with `tg_send_photo`. All tools are defined once in `src/tools/` and shared by every mode.
+
+## Scheduler
+
+`schedule_add` takes a cron expression and a job `type`:
+
+- `shell` -- run a command; you get the output when it finishes.
+- `prompt` -- run an agent instruction (only in `all`/`chat` with an API key).
+- `notify` -- a plain reminder.
+
+Results are pushed to you via Telegram when configured. Example: "every weekday at 9am, pull the repo and run tests" becomes a `shell` job on `0 9 * * 1-5`.
 
 ## Configuration
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | -- | Required for `chat` and `telegram` modes. |
+| `ANTHROPIC_API_KEY` | -- | Required for chat / telegram / all. |
 | `NOTICODE_WORKSPACE` | `cwd` | Root directory the agent operates in. |
-| `NOTICODE_HOST` | `127.0.0.1` | Host the HTTP server (`serve`) binds to. |
-| `NOTICODE_PORT` | `4319` | Port for the HTTP server (`serve`). |
-| `NOTICODE_TOKEN` | -- | Optional bearer token to protect the HTTP endpoint. |
-| `NOTICODE_MODEL` | `claude-sonnet-4-20250514` | Model used in chat and telegram modes. |
-| `NOTICODE_ALLOW_SHELL` | `true` | Set `false` to block shell execution. |
-| `NOTICODE_ALLOW_WRITE` | `true` | Set `false` to make the agent read-only. |
+| `NOTICODE_HOST` / `NOTICODE_PORT` | `127.0.0.1` / `4319` | HTTP server bind. |
+| `NOTICODE_TOKEN` | -- | Optional bearer token for the HTTP endpoint. |
+| `NOTICODE_MODEL` | `claude-sonnet-4-20250514` | Model for chat/telegram/all. |
+| `NOTICODE_ALLOW_SHELL` | `true` | `false` to block shell execution. |
+| `NOTICODE_ALLOW_WRITE` | `true` | `false` to make the agent read-only. |
 | `NOTICODE_MAX_OUTPUT` | `30000` | Max chars returned per tool call. |
-| `TELEGRAM_BOT_TOKEN` | -- | Bot token from @BotFather. Required for `telegram` and the `tg_*` tools. |
-| `TELEGRAM_CHAT_ID` | -- | Optional. Locks the bot to one chat and is the default `tg_send` target. |
+| `TELEGRAM_BOT_TOKEN` | -- | Bot token from @BotFather. |
+| `TELEGRAM_CHAT_ID` | -- | Lock the bot to one chat; default notify target. |
+| `HOME_ASSISTANT_URL` | -- | Base URL of your Home Assistant. |
+| `HOME_ASSISTANT_TOKEN` | -- | Long-lived access token for Home Assistant. |
 
 ## Security
 
-NotiCode can run arbitrary commands and modify files. That is the whole point, and also the whole risk. Run it against projects you trust, scope `NOTICODE_WORKSPACE` tightly, and flip `NOTICODE_ALLOW_SHELL=false` / `NOTICODE_ALLOW_WRITE=false` when you only need read access. When using `serve`, keep the bind on `127.0.0.1` and set `NOTICODE_TOKEN` before exposing it through any tunnel. When using `telegram`, always set `TELEGRAM_CHAT_ID` so a stranger who finds your bot can't drive your machine.
+NotiCode runs arbitrary commands, edits files, drives a browser, sees your screen and camera, and can control your home. That power is the point and the risk. Scope `NOTICODE_WORKSPACE` tightly, flip `NOTICODE_ALLOW_SHELL` / `NOTICODE_ALLOW_WRITE` to `false` when you only need read access, keep the HTTP bind on `127.0.0.1` and set `NOTICODE_TOKEN` before tunneling, and **always set `TELEGRAM_CHAT_ID`** so a stranger who finds your bot can't drive your machine.
 
 ## Project structure
 
 ```
 src/
-  index.ts            CLI entry (mcp | serve | chat | telegram | help)
-  config.ts           Env-based configuration
-  theme.ts            Blue terminal palette + banner
+  index.ts              CLI entry (all | mcp | serve | chat | telegram | help)
+  config.ts             Env-based configuration
+  theme.ts              Blue terminal palette + banner
+  runner/
+    all.ts              Unified mode: HTTP MCP + Telegram bot + scheduler
   mcp/
-    server.ts         buildMcpServer + stdio entry point
-    http.ts           Streamable HTTP entry point (prints a URL)
+    server.ts           buildMcpServer + stdio entry point
+    http.ts             Streamable HTTP entry point (prints a URL)
   agent/
-    core.ts           Shared agent loop (model + tool-use) used by chat and telegram
-    agent.ts          Interactive terminal chat loop
-    telegram-bot.ts   Telegram bot bridge to the agent loop
+    core.ts             Shared agent loop (model + tool-use)
+    agent.ts            Interactive terminal chat
+    telegram-bot.ts     Telegram bot bridge to the agent loop
+  scheduler/
+    scheduler.ts        Cron scheduler runtime
   tools/
-    index.ts          Tool registry
-    types.ts          Shared tool + context types
-    filesystem.ts     fs_read / fs_write / fs_edit / fs_list / fs_search
-    shell.ts          shell_exec
-    system.ts         sys_info
-    telegram.ts       tg_send / tg_read
+    index.ts            Tool registry
+    types.ts            Shared tool + context types
+    filesystem.ts       fs_read / fs_write / fs_edit / fs_list / fs_search
+    shell.ts            shell_exec
+    system.ts           sys_info
+    telegram.ts         tg_send / tg_send_photo / tg_read
+    notify.ts           notify
+    home-assistant.ts   ha_states / ha_call_service
+    browser.ts          browser_navigate / click / type / eval / screenshot
+    capture.ts          screen_capture / webcam_capture
+    scheduler.ts        schedule_add / schedule_list / schedule_cancel
 ```
 
 ## Roadmap
 
 - [x] HTTP / Streamable HTTP transport in addition to stdio
 - [x] Telegram bot bridge
+- [x] Unified `all` mode
+- [x] Browser automation, screen/webcam capture, Home Assistant, scheduler
 - [ ] Streaming responses in chat mode
 - [ ] Pluggable LLM providers (OpenAI, local models)
 - [ ] Per-tool permission prompts
