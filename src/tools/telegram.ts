@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { z } from "zod";
 import type { NotiTool, ToolContext } from "./types.js";
 
@@ -10,7 +12,7 @@ function requireToken(ctx: ToolContext): string {
   return ctx.telegramToken;
 }
 
-/** Thin wrapper around the Telegram Bot API. */
+/** Thin wrapper around the Telegram Bot API (JSON methods). */
 export async function callTelegram(
   token: string,
   method: string,
@@ -24,6 +26,26 @@ export async function callTelegram(
   const data = (await res.json()) as any;
   if (!data.ok) {
     throw new Error(`Telegram API error (${method}): ${data.description ?? res.status}`);
+  }
+  return data.result;
+}
+
+/** Upload a local image file to a chat via multipart/form-data. */
+export async function sendPhoto(
+  token: string,
+  chatId: string,
+  filePath: string,
+  caption?: string,
+): Promise<any> {
+  const buf = await readFile(filePath);
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  if (caption) form.append("caption", caption);
+  form.append("photo", new Blob([buf]), basename(filePath));
+  const res = await fetch(`${API}/bot${token}/sendPhoto`, { method: "POST", body: form });
+  const data = (await res.json()) as any;
+  if (!data.ok) {
+    throw new Error(`Telegram API error (sendPhoto): ${data.description ?? res.status}`);
   }
   return data.result;
 }
@@ -57,6 +79,26 @@ export const tgSend: NotiTool = {
       msg = await callTelegram(token, "sendMessage", { chat_id: chatId, text: args.text });
     }
     return `Sent message ${msg.message_id} to chat ${chatId}.`;
+  },
+};
+
+export const tgSendPhoto: NotiTool = {
+  name: "tg_send_photo",
+  description:
+    "Send an image file (e.g. from screen_capture, webcam_capture, or browser_screenshot) to the user on Telegram.",
+  schema: z.object({
+    path: z.string().describe("Local path to the image file to send."),
+    caption: z.string().optional().describe("Optional caption."),
+    chat_id: z.string().optional().describe("Target chat ID. Defaults to TELEGRAM_CHAT_ID."),
+  }),
+  handler: async (args, ctx) => {
+    const token = requireToken(ctx);
+    const chatId = args.chat_id || ctx.telegramChatId;
+    if (!chatId) {
+      throw new Error("No chat_id provided and TELEGRAM_CHAT_ID is not set.");
+    }
+    const msg = await sendPhoto(token, chatId, args.path, args.caption);
+    return `Sent photo ${msg.message_id} to chat ${chatId}.`;
   },
 };
 
