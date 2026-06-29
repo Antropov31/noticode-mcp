@@ -19,6 +19,7 @@
     "mcp": "node dist/index.js mcp",
     "serve": "node dist/index.js serve",
     "chat": "node dist/index.js chat",
+    "telegram": "node dist/index.js telegram",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -28,7 +29,9 @@
     "coding-agent",
     "claude",
     "llm",
-    "cli"
+    "cli",
+    "telegram",
+    "telegram-bot"
   ],
   "author": "Antropov31",
   "license": "MIT",
