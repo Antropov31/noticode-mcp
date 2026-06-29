@@ -1,6 +1,7 @@
 import { readFile, writeFile, editFile, listDir, search } from "./filesystem.js";
 import { shellExec } from "./shell.js";
 import { systemInfo } from "./system.js";
+import { tgSend, tgRead } from "./telegram.js";
 import type { NotiTool } from "./types.js";
 
 export const tools: NotiTool[] = [
@@ -11,6 +12,8 @@ export const tools: NotiTool[] = [
   search,
   shellExec,
   systemInfo,
+  tgSend,
+  tgRead,
 ];
 
 export type { NotiTool, ToolContext } from "./types.js";
