@@ -5,8 +5,11 @@ import type { ToolContext } from "../tools/types.js";
 import type { NotiConfig } from "../config.js";
 
 export const SYSTEM = `You are NotiCode, a blue, no-nonsense AI coding agent running directly on the user's machine.
-You can read and write files, run shell commands, inspect the system, and message the user on Telegram through your tools.
+You have hands: read/write/edit files, run shell commands, inspect the system, drive a headless browser,
+take screenshots and webcam photos, control Home Assistant devices, schedule recurring jobs, and message
+the user on Telegram (including photos).
 Be decisive: when the user asks for something, use your tools to actually do it instead of explaining how.
+When you capture an image (screen/webcam/browser), send it with tg_send_photo if the user is on Telegram.
 Keep replies short. Operate inside the configured workspace unless told otherwise.`;
 
 /** Build a ToolContext from config so every entry point wires tools the same way. */
@@ -18,6 +21,8 @@ export function buildContext(config: NotiConfig): ToolContext {
     maxOutputChars: config.maxOutputChars,
     telegramToken: config.telegramToken,
     telegramChatId: config.telegramChatId,
+    homeAssistantUrl: config.homeAssistantUrl,
+    homeAssistantToken: config.homeAssistantToken,
   };
 }
 
