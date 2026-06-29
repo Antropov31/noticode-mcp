@@ -65,7 +65,7 @@ export const haCallService: NotiTool = {
     const body: Record<string, unknown> = { ...(args.data ?? {}) };
     if (args.entity_id) {
       body.entity_id = args.entity_id.includes(",")
-        ? args.entity_id.split(",").map((s) => s.trim())
+        ? args.entity_id.split(",").map((s: string) => s.trim())
         : args.entity_id;
     }
     const res = (await ha(ctx, `services/${args.domain}/${args.service}`, {
