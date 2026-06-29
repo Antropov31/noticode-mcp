@@ -1,0 +1,127 @@
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
+import { z } from "zod";
+import type { NotiTool, ToolContext } from "./types.js";
+
+const API = "https://api.telegram.org";
+
+function requireToken(ctx: ToolContext): string {
+  if (!ctx.telegramToken) {
+    throw new Error("Telegram is not configured. Set TELEGRAM_BOT_TOKEN.");
+  }
+  return ctx.telegramToken;
+}
+
+/** Thin wrapper around the Telegram Bot API (JSON methods). */
+export async function callTelegram(
+  token: string,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<any> {
+  const res = await fetch(`${API}/bot${token}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json()) as any;
+  if (!data.ok) {
+    throw new Error(`Telegram API error (${method}): ${data.description ?? res.status}`);
+  }
+  return data.result;
+}
+
+/** Upload a local image file to a chat via multipart/form-data. */
+export async function sendPhoto(
+  token: string,
+  chatId: string,
+  filePath: string,
+  caption?: string,
+): Promise<any> {
+  const buf = await readFile(filePath);
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  if (caption) form.append("caption", caption);
+  form.append("photo", new Blob([buf]), basename(filePath));
+  const res = await fetch(`${API}/bot${token}/sendPhoto`, { method: "POST", body: form });
+  const data = (await res.json()) as any;
+  if (!data.ok) {
+    throw new Error(`Telegram API error (sendPhoto): ${data.description ?? res.status}`);
+  }
+  return data.result;
+}
+
+export const tgSend: NotiTool = {
+  name: "tg_send",
+  description:
+    "Send a message to the user on Telegram through the configured bot. Use this to notify, report progress, or reply on the go.",
+  schema: z.object({
+    text: z.string().describe("Message text to send. Markdown is supported."),
+    chat_id: z
+      .string()
+      .optional()
+      .describe("Target chat ID. Defaults to TELEGRAM_CHAT_ID when omitted."),
+  }),
+  handler: async (args, ctx) => {
+    const token = requireToken(ctx);
+    const chatId = args.chat_id || ctx.telegramChatId;
+    if (!chatId) {
+      throw new Error("No chat_id provided and TELEGRAM_CHAT_ID is not set.");
+    }
+    let msg: any;
+    try {
+      msg = await callTelegram(token, "sendMessage", {
+        chat_id: chatId,
+        text: args.text,
+        parse_mode: "Markdown",
+      });
+    } catch {
+      // Retry without Markdown in case the text breaks the parser.
+      msg = await callTelegram(token, "sendMessage", { chat_id: chatId, text: args.text });
+    }
+    return `Sent message ${msg.message_id} to chat ${chatId}.`;
+  },
+};
+
+export const tgSendPhoto: NotiTool = {
+  name: "tg_send_photo",
+  description:
+    "Send an image file (e.g. from screen_capture, webcam_capture, or browser_screenshot) to the user on Telegram.",
+  schema: z.object({
+    path: z.string().describe("Local path to the image file to send."),
+    caption: z.string().optional().describe("Optional caption."),
+    chat_id: z.string().optional().describe("Target chat ID. Defaults to TELEGRAM_CHAT_ID."),
+  }),
+  handler: async (args, ctx) => {
+    const token = requireToken(ctx);
+    const chatId = args.chat_id || ctx.telegramChatId;
+    if (!chatId) {
+      throw new Error("No chat_id provided and TELEGRAM_CHAT_ID is not set.");
+    }
+    const msg = await sendPhoto(token, chatId, args.path, args.caption);
+    return `Sent photo ${msg.message_id} to chat ${chatId}.`;
+  },
+};
+
+export const tgRead: NotiTool = {
+  name: "tg_read",
+  description:
+    "Read the most recent incoming Telegram messages sent to the bot (getUpdates). Useful to see what the user wrote.",
+  schema: z.object({
+    limit: z.number().int().optional().describe("Max messages to return (default: 10)."),
+  }),
+  handler: async (args, ctx) => {
+    const token = requireToken(ctx);
+    const updates = (await callTelegram(token, "getUpdates", {
+      limit: args.limit ?? 10,
+      timeout: 0,
+    })) as any[];
+    const lines = updates
+      .map((u) => u.message ?? u.edited_message)
+      .filter(Boolean)
+      .map((m: any) => {
+        const who = m.from?.username ?? m.from?.first_name ?? "unknown";
+        return `[chat ${m.chat?.id}] ${who}: ${m.text ?? "(non-text message)"}`;
+      });
+    return lines.join("\n") || "(no recent messages)";
+  },
+};

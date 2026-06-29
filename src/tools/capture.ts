@@ -1,0 +1,62 @@
+import path from "node:path";
+import fs from "node:fs/promises";
+import { z } from "zod";
+import type { NotiTool, ToolContext } from "./types.js";
+
+async function outPath(ctx: ToolContext, prefix: string): Promise<string> {
+  const dir = path.resolve(ctx.workspace, ".noticode", "captures");
+  await fs.mkdir(dir, { recursive: true });
+  return path.join(dir, `${prefix}-${Date.now()}.png`);
+}
+
+export const screenCapture: NotiTool = {
+  name: "screen_capture",
+  description:
+    "Take a screenshot of the host's screen and save it as a PNG. Returns the file path (send it with tg_send_photo).",
+  schema: z.object({
+    display: z.number().int().optional().describe("Display index for multi-monitor setups (default: primary)."),
+  }),
+  handler: async (args, ctx) => {
+    let screenshot: any;
+    try {
+      screenshot = (await import("screenshot-desktop")).default;
+    } catch {
+      throw new Error("screenshot-desktop is not installed. Run `npm install`.");
+    }
+    const file = await outPath(ctx, "screen");
+    await screenshot({ filename: file, screen: args.display });
+    return file;
+  },
+};
+
+export const webcamCapture: NotiTool = {
+  name: "webcam_capture",
+  description:
+    "Capture a still photo from the host's webcam and save it as a PNG. Returns the file path. Requires a camera and a platform capture backend (fswebcam on Linux, imagesnap on macOS, or ffmpeg).",
+  schema: z.object({
+    width: z.number().int().optional().describe("Capture width (default: 1280)."),
+    height: z.number().int().optional().describe("Capture height (default: 720)."),
+  }),
+  handler: async (args, ctx) => {
+    let NodeWebcam: any;
+    try {
+      NodeWebcam = (await import("node-webcam")).default;
+    } catch {
+      throw new Error("node-webcam is not installed. Run `npm install`.");
+    }
+    const file = await outPath(ctx, "webcam");
+    const cam = NodeWebcam.create({
+      width: args.width ?? 1280,
+      height: args.height ?? 720,
+      output: "png",
+      saveShots: true,
+      callbackReturn: "location",
+    });
+    // node-webcam appends the extension itself, so pass the path without it.
+    const base = file.replace(/\.png$/, "");
+    await new Promise<void>((resolve, reject) => {
+      cam.capture(base, (err: any) => (err ? reject(err) : resolve()));
+    });
+    return file;
+  },
+};
