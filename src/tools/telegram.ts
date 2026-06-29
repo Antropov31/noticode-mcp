@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { z } from "zod";
 import type { NotiTool, ToolContext } from "./types.js";
 
@@ -10,7 +12,7 @@ function requireToken(ctx: ToolContext): string {
   return ctx.telegramToken;
 }
 
-/** Thin wrapper around the Telegram Bot API. */
+/** Thin wrapper around the Telegram Bot API (JSON methods). */
 export async function callTelegram(
   token: string,
   method: string,
@@ -21,6 +23,28 @@ export async function callTelegram(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  const data = (await res.json()) as any;
+  if (!data.ok) {
+    throw new Error(`Telegram API error (${method}): ${data.description ?? res.status}`);
+  }
+  return data.result;
+}
+
+/** Upload a local file to a chat (multipart). `kind` picks the Telegram method. */
+export async function sendFile(
+  token: string,
+  chatId: string,
+  filePath: string,
+  kind: "photo" | "document" = "document",
+  caption?: string,
+): Promise<any> {
+  const buf = await fs.readFile(filePath);
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  if (caption) form.set("caption", caption);
+  form.set(kind, new Blob([buf]), path.basename(filePath));
+  const method = kind === "photo" ? "sendPhoto" : "sendDocument";
+  const res = await fetch(`${API}/bot${token}/${method}`, { method: "POST", body: form });
   const data = (await res.json()) as any;
   if (!data.ok) {
     throw new Error(`Telegram API error (${method}): ${data.description ?? res.status}`);
