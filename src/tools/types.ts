@@ -5,6 +5,8 @@ export interface ToolContext {
   allowShell: boolean;
   allowWrite: boolean;
   maxOutputChars: number;
+  telegramToken?: string;
+  telegramChatId?: string;
 }
 
 export interface NotiTool {
