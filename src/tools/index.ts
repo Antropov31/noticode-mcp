@@ -3,6 +3,7 @@ import { shellExec } from "./shell.js";
 import { systemInfo } from "./system.js";
 import { screenCapture, webcamCapture } from "./capture.js";
 import { screenWatch } from "./screen-stream.js";
+import { screenSee, screenReadText, screenFind } from "./vision.js";
 import {
   browserNavigate,
   browserClick,
@@ -26,6 +27,7 @@ import {
   inputScroll,
 } from "./input.js";
 import { desktopOpen, desktopPower, desktopVolume } from "./desktop.js";
+import { windowList, windowActive, windowFocus, windowMove } from "./windows.js";
 import { clipboardRead, clipboardWrite } from "./clipboard.js";
 import { micCapture, audioPlay } from "./audio.js";
 import { osNotify } from "./os-notify.js";
@@ -49,6 +51,10 @@ export const tools: NotiTool[] = [
   screenCapture,
   webcamCapture,
   screenWatch,
+  // Real-time vision + on-screen element recognition (OCR)
+  screenSee,
+  screenReadText,
+  screenFind,
   // Input control: mouse + keyboard
   inputMove,
   inputClick,
@@ -67,6 +73,11 @@ export const tools: NotiTool[] = [
   desktopOpen,
   desktopPower,
   desktopVolume,
+  // Window management (mobility)
+  windowList,
+  windowActive,
+  windowFocus,
+  windowMove,
   // Clipboard
   clipboardRead,
   clipboardWrite,
