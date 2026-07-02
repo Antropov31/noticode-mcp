@@ -10,7 +10,17 @@ import {
   browserEval,
   browserScreenshot,
 } from "./browser.js";
-import { inputMove, inputClick, inputType, inputKey, inputScroll } from "./input.js";
+import {
+  inputMove,
+  inputClick,
+  inputMouseButton,
+  inputDrag,
+  inputDraw,
+  inputDrawShape,
+  inputType,
+  inputKey,
+  inputScroll,
+} from "./input.js";
 import { clipboardRead, clipboardWrite } from "./clipboard.js";
 import { micCapture, audioPlay } from "./audio.js";
 import { osNotify } from "./os-notify.js";
@@ -37,6 +47,10 @@ export const tools: NotiTool[] = [
   // Input control: mouse + keyboard
   inputMove,
   inputClick,
+  inputMouseButton,
+  inputDrag,
+  inputDraw,
+  inputDrawShape,
   inputType,
   inputKey,
   inputScroll,
