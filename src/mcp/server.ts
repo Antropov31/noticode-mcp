@@ -2,7 +2,27 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { tools } from "../tools/index.js";
 import { buildToolContext } from "../tools/types.js";
+import type { ToolResult } from "../tools/types.js";
 import type { NotiConfig } from "../config.js";
+
+/** Normalize a tool's return value into MCP content blocks (text + images). */
+function toContent(result: ToolResult) {
+  const content: any[] = [];
+  if (typeof result === "string") {
+    content.push({ type: "text" as const, text: result });
+    return content;
+  }
+  if (result.text) content.push({ type: "text" as const, text: result.text });
+  for (const img of result.images ?? []) {
+    content.push({
+      type: "image" as const,
+      data: img.data,
+      mimeType: img.mimeType ?? "image/png",
+    });
+  }
+  if (content.length === 0) content.push({ type: "text" as const, text: "(no output)" });
+  return content;
+}
 
 /** Build an McpServer with every NotiCode tool registered. Shared by stdio + http. */
 export function buildMcpServer(config: NotiConfig): McpServer {
@@ -18,8 +38,8 @@ export function buildMcpServer(config: NotiConfig): McpServer {
       },
       async (args: any) => {
         try {
-          const text = await tool.handler(args, ctx);
-          return { content: [{ type: "text" as const, text }] };
+          const result = await tool.handler(args, ctx);
+          return { content: toContent(result) };
         } catch (e: any) {
           return {
             content: [{ type: "text" as const, text: `Error: ${e?.message ?? e}` }],
@@ -38,5 +58,5 @@ export async function startMcpServer(config: NotiConfig): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Log to stderr: stdout is reserved for the MCP protocol stream.
-  process.stderr.write(`NotiCode MCP server running on stdio · workspace: ${config.workspace}\n`);
+  process.stderr.write(`NotiCode MCP server running on stdio \u00b7 workspace: ${config.workspace}\n`);
 }
