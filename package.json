@@ -1,7 +1,7 @@
 {
   "name": "noticode",
   "version": "0.1.0",
-  "description": "A blue, open AI coding agent that runs as an MCP server. Connect Claude or any MCP client, chat with it, DM it on Telegram, and let it edit files, control your machine, drive a browser, and run your smart home.",
+  "description": "A blue, open AI coding agent that runs as an MCP server. Connect Claude or any MCP client, chat with it, and let it edit files and control your machine.",
   "type": "module",
   "bin": {
     "noticode": "./dist/index.js"
@@ -16,11 +16,9 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "all": "node dist/index.js all",
     "mcp": "node dist/index.js mcp",
     "serve": "node dist/index.js serve",
     "chat": "node dist/index.js chat",
-    "telegram": "node dist/index.js telegram",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -30,12 +28,7 @@
     "coding-agent",
     "claude",
     "llm",
-    "cli",
-    "telegram",
-    "telegram-bot",
-    "home-assistant",
-    "playwright",
-    "automation"
+    "cli"
   ],
   "author": "Antropov31",
   "license": "MIT",
@@ -48,17 +41,17 @@
     "chalk": "^5.3.0",
     "express": "^4.21.2",
     "fast-glob": "^3.3.2",
-    "node-cron": "^3.0.3",
-    "node-webcam": "^0.8.2",
-    "playwright": "^1.45.0",
-    "screenshot-desktop": "^1.15.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.23.2"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.48.0",
+    "screenshot-desktop": "^1.15.0",
+    "node-webcam": "^0.8.1"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.10",
-    "@types/node-cron": "^3.0.11",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3"
   }
