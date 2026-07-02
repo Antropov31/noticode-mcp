@@ -1,25 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { tools } from "../tools/index.js";
-import type { ToolContext } from "../tools/types.js";
+import { buildToolContext } from "../tools/types.js";
 import type { NotiConfig } from "../config.js";
 
-/**
- * Build a fully-wired McpServer (all tools registered) without binding it to a
- * transport. Reused by both the stdio and HTTP entry points.
- */
+/** Build an McpServer with every NotiCode tool registered. Shared by stdio + http. */
 export function buildMcpServer(config: NotiConfig): McpServer {
-  const ctx: ToolContext = {
-    workspace: config.workspace,
-    allowShell: config.allowShell,
-    allowWrite: config.allowWrite,
-    maxOutputChars: config.maxOutputChars,
-  };
-
-  const server = new McpServer({
-    name: "noticode",
-    version: "0.1.0",
-  });
+  const ctx = buildToolContext(config);
+  const server = new McpServer({ name: "noticode", version: "0.1.0" });
 
   for (const tool of tools) {
     server.registerTool(
@@ -50,5 +38,5 @@ export async function startMcpServer(config: NotiConfig): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Log to stderr: stdout is reserved for the MCP protocol stream.
-  process.stderr.write(`NotiCode MCP server running on stdio \u00b7 workspace: ${config.workspace}\n`);
+  process.stderr.write(`NotiCode MCP server running on stdio · workspace: ${config.workspace}\n`);
 }

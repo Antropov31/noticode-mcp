@@ -8,3 +8,6 @@ npm-debug.log*
 .idea/
 .vscode/
 coverage/
+
+# NotiCode runtime captures / recordings
+.noticode/

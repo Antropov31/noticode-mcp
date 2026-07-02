@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { z } from "zod";
 import type { NotiTool, ToolContext } from "./types.js";
+import { importOptional } from "./optional.js";
 
 async function outPath(ctx: ToolContext, prefix: string): Promise<string> {
   const dir = path.resolve(ctx.workspace, ".noticode", "captures");
@@ -12,17 +13,12 @@ async function outPath(ctx: ToolContext, prefix: string): Promise<string> {
 export const screenCapture: NotiTool = {
   name: "screen_capture",
   description:
-    "Take a screenshot of the host's screen and save it as a PNG. Returns the file path (send it with tg_send_photo).",
+    "Take a screenshot of the host's screen and save it as a PNG. Returns the file path.",
   schema: z.object({
     display: z.number().int().optional().describe("Display index for multi-monitor setups (default: primary)."),
   }),
   handler: async (args, ctx) => {
-    let screenshot: any;
-    try {
-      screenshot = (await import("screenshot-desktop")).default;
-    } catch {
-      throw new Error("screenshot-desktop is not installed. Run `npm install`.");
-    }
+    const screenshot = (await importOptional("screenshot-desktop", "Run `npm install`.")).default;
     const file = await outPath(ctx, "screen");
     await screenshot({ filename: file, screen: args.display });
     return file;
@@ -32,18 +28,13 @@ export const screenCapture: NotiTool = {
 export const webcamCapture: NotiTool = {
   name: "webcam_capture",
   description:
-    "Capture a still photo from the host's webcam and save it as a PNG. Returns the file path. Requires a camera and a platform capture backend (fswebcam on Linux, imagesnap on macOS, or ffmpeg).",
+    "Capture a still photo from the host's webcam and save it as a PNG. Returns the file path. Requires a camera and a capture backend (fswebcam on Linux, imagesnap on macOS, or ffmpeg).",
   schema: z.object({
     width: z.number().int().optional().describe("Capture width (default: 1280)."),
     height: z.number().int().optional().describe("Capture height (default: 720)."),
   }),
   handler: async (args, ctx) => {
-    let NodeWebcam: any;
-    try {
-      NodeWebcam = (await import("node-webcam")).default;
-    } catch {
-      throw new Error("node-webcam is not installed. Run `npm install`.");
-    }
+    const NodeWebcam = (await importOptional("node-webcam", "Run `npm install`.")).default;
     const file = await outPath(ctx, "webcam");
     const cam = NodeWebcam.create({
       width: args.width ?? 1280,

@@ -45,9 +45,14 @@
     "zod-to-json-schema": "^3.23.2"
   },
   "optionalDependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.0",
+    "clipboardy": "^4.0.0",
+    "node-notifier": "^10.0.1",
+    "node-record-lpcm16": "^1.0.1",
+    "node-webcam": "^0.8.1",
+    "play-sound": "^1.1.6",
     "playwright": "^1.48.0",
-    "screenshot-desktop": "^1.15.0",
-    "node-webcam": "^0.8.1"
+    "screenshot-desktop": "^1.15.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
