@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { NotiTool, ToolContext, ToolImage } from "./types.js";
 import { importOptional } from "./optional.js";
 
-const RegionSchema = z
+export const RegionSchema = z
   .object({
     x: z.number().int().describe("Left edge in absolute screen pixels."),
     y: z.number().int().describe("Top edge in absolute screen pixels."),
@@ -13,16 +13,26 @@ const RegionSchema = z
   })
   .describe("A rectangle in absolute screen pixels.");
 
-type Region = { x: number; y: number; width: number; height: number };
+export type Region = { x: number; y: number; width: number; height: number };
+
+export interface Box {
+  text: string;
+  confidence: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  center: { x: number; y: number };
+}
 
 /** Grab a full-screen PNG as a Buffer. */
-async function grab(display?: number): Promise<Buffer> {
+export async function grabScreen(display?: number): Promise<Buffer> {
   const screenshot = (await importOptional("screenshot-desktop", "Run `npm install`.")).default;
   return screenshot({ screen: display, format: "png" });
 }
 
 /** Optionally crop to a region and/or downscale a PNG buffer using sharp. */
-async function processImage(
+export async function processImage(
   buf: Buffer,
   opts: { region?: Region; scale?: number },
 ): Promise<Buffer> {
@@ -47,7 +57,7 @@ async function processImage(
 }
 
 /** Run OCR over a PNG buffer and return words with bounding boxes. */
-async function ocrWords(
+export async function ocrWords(
   buf: Buffer,
   lang: string | undefined,
 ): Promise<Array<{ text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } }>> {
@@ -71,10 +81,10 @@ async function ocrWords(
 }
 
 /** Convert an OCR word bbox (relative to an optional region) into absolute box + center. */
-function toBox(
+export function toBox(
   w: { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } },
   region?: Region,
-) {
+): Box {
   const offX = region?.x ?? 0;
   const offY = region?.y ?? 0;
   const x = Math.round(offX + w.bbox.x0);
@@ -92,6 +102,22 @@ function toBox(
   };
 }
 
+/** Capture + OCR + match: find on-screen text and return click-ready boxes, best first. */
+export async function findOnScreen(
+  query: string,
+  opts: { display?: number; region?: Region; lang?: string; limit?: number } = {},
+): Promise<Box[]> {
+  const raw = await grabScreen(opts.display);
+  const buf = await processImage(raw, { region: opts.region });
+  const words = await ocrWords(buf, opts.lang);
+  const q = query.trim().toLowerCase();
+  return words
+    .filter((w) => w.text && w.text.toLowerCase().includes(q))
+    .map((w) => toBox(w, opts.region))
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, opts.limit ?? 5);
+}
+
 export const screenSee: NotiTool = {
   name: "screen_see",
   description:
@@ -106,7 +132,7 @@ export const screenSee: NotiTool = {
     save: z.boolean().optional().describe("Also save the PNG into the workspace and include its path."),
   }),
   handler: async (args, ctx: ToolContext) => {
-    const raw = await grab(args.display);
+    const raw = await grabScreen(args.display);
     const buf = await processImage(raw, { region: args.region, scale: args.scale });
     const image: ToolImage = { data: buf.toString("base64"), mimeType: "image/png" };
     let text = "Here is the current screen.";
@@ -132,7 +158,7 @@ export const screenReadText: NotiTool = {
     min_confidence: z.number().optional().describe("Drop words below this confidence 0-100 (default: 50)."),
   }),
   handler: async (args, ctx: ToolContext) => {
-    const raw = await grab(args.display);
+    const raw = await grabScreen(args.display);
     const buf = await processImage(raw, { region: args.region });
     const words = await ocrWords(buf, args.lang);
     const min = args.min_confidence ?? 50;
@@ -160,15 +186,12 @@ export const screenFind: NotiTool = {
     limit: z.number().int().optional().describe("Maximum matches to return (default: 5)."),
   }),
   handler: async (args) => {
-    const raw = await grab(args.display);
-    const buf = await processImage(raw, { region: args.region });
-    const words = await ocrWords(buf, args.lang);
-    const q = args.query.trim().toLowerCase();
-    const matches = words
-      .filter((w) => w.text && w.text.toLowerCase().includes(q))
-      .map((w) => toBox(w, args.region))
-      .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, args.limit ?? 5);
+    const matches = await findOnScreen(args.query, {
+      display: args.display,
+      region: args.region,
+      lang: args.lang,
+      limit: args.limit,
+    });
     if (!matches.length) return `No on-screen match for "${args.query}".`;
     const lines = matches.map(
       (m, i) => `${i + 1}. "${m.text}" -> click (${m.center.x}, ${m.center.y}) [conf ${m.confidence}]`,
