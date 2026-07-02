@@ -17,10 +17,15 @@ import {
   inputDrag,
   inputDraw,
   inputDrawShape,
+  inputMoveRelative,
+  inputCursorPosition,
+  inputScreenSize,
+  inputWait,
   inputType,
   inputKey,
   inputScroll,
 } from "./input.js";
+import { desktopOpen, desktopPower, desktopVolume } from "./desktop.js";
 import { clipboardRead, clipboardWrite } from "./clipboard.js";
 import { micCapture, audioPlay } from "./audio.js";
 import { osNotify } from "./os-notify.js";
@@ -51,9 +56,17 @@ export const tools: NotiTool[] = [
   inputDrag,
   inputDraw,
   inputDrawShape,
+  inputMoveRelative,
+  inputCursorPosition,
+  inputScreenSize,
+  inputWait,
   inputType,
   inputKey,
   inputScroll,
+  // Desktop control
+  desktopOpen,
+  desktopPower,
+  desktopVolume,
   // Clipboard
   clipboardRead,
   clipboardWrite,

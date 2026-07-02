@@ -35,7 +35,6 @@ function pathFromWaypoints(
     const a = waypoints[i - 1];
     const b = waypoints[i];
     if (smoothSteps > 0) {
-      // skip the first point of each segment (already present as previous end)
       const seg = lerpPath(Point, a.x, a.y, b.x, b.y, smoothSteps);
       for (let j = 1; j < seg.length; j++) path.push(seg[j]);
     } else {
@@ -56,6 +55,56 @@ export const inputMove: NotiTool = {
     const { mouse, Point } = await nut();
     await mouse.setPosition(new Point(args.x, args.y));
     return `Moved cursor to (${args.x}, ${args.y}).`;
+  },
+};
+
+export const inputMoveRelative: NotiTool = {
+  name: "input_move_relative",
+  description: "Move the mouse cursor by an offset (dx, dy) from its current position.",
+  schema: z.object({
+    dx: z.number().int().describe("Horizontal offset in pixels (positive = right)."),
+    dy: z.number().int().describe("Vertical offset in pixels (positive = down)."),
+  }),
+  handler: async (args) => {
+    const { mouse, Point } = await nut();
+    const pos = await mouse.getPosition();
+    const nx = pos.x + args.dx;
+    const ny = pos.y + args.dy;
+    await mouse.setPosition(new Point(nx, ny));
+    return `Moved cursor by (${args.dx}, ${args.dy}) to (${nx}, ${ny}).`;
+  },
+};
+
+export const inputCursorPosition: NotiTool = {
+  name: "input_cursor_position",
+  description: "Return the current mouse cursor position as absolute screen coordinates.",
+  schema: z.object({}),
+  handler: async () => {
+    const { mouse } = await nut();
+    const pos = await mouse.getPosition();
+    return `Cursor is at (${pos.x}, ${pos.y}).`;
+  },
+};
+
+export const inputScreenSize: NotiTool = {
+  name: "input_screen_size",
+  description: "Return the primary screen size in pixels. Use it to plan click/draw coordinates.",
+  schema: z.object({}),
+  handler: async () => {
+    const { screen } = await nut();
+    const w = await screen.width();
+    const h = await screen.height();
+    return `Screen is ${w}x${h} pixels.`;
+  },
+};
+
+export const inputWait: NotiTool = {
+  name: "input_wait",
+  description: "Pause for a number of milliseconds. Useful to time UI reactions between input actions.",
+  schema: z.object({ ms: z.number().int().min(0).describe("Milliseconds to wait.") }),
+  handler: async (args) => {
+    await new Promise((r) => setTimeout(r, args.ms));
+    return `Waited ${args.ms} ms.`;
   },
 };
 
