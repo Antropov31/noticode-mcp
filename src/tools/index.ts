@@ -4,6 +4,9 @@ import { systemInfo } from "./system.js";
 import { screenCapture, webcamCapture } from "./capture.js";
 import { screenWatch } from "./screen-stream.js";
 import { screenSee, screenReadText, screenFind } from "./vision.js";
+import { screenFindImage } from "./ui-detect.js";
+import { screenRecord } from "./screen-record.js";
+import { clickElement, waitFor } from "./smart-actions.js";
 import {
   browserNavigate,
   browserClick,
@@ -28,6 +31,8 @@ import {
 } from "./input.js";
 import { desktopOpen, desktopPower, desktopVolume } from "./desktop.js";
 import { windowList, windowActive, windowFocus, windowMove } from "./windows.js";
+import { processList, processStart, processKill } from "./process.js";
+import { osStatus } from "./os-status.js";
 import { clipboardRead, clipboardWrite } from "./clipboard.js";
 import { micCapture, audioPlay } from "./audio.js";
 import { osNotify } from "./os-notify.js";
@@ -47,14 +52,20 @@ export const tools: NotiTool[] = [
   // Shell + system
   shellExec,
   systemInfo,
+  osStatus,
   // Vision: let the agent see the machine it runs on
   screenCapture,
   webcamCapture,
   screenWatch,
-  // Real-time vision + on-screen element recognition (OCR)
+  screenRecord,
+  // Real-time vision + on-screen element recognition (OCR + image match)
   screenSee,
   screenReadText,
   screenFind,
+  screenFindImage,
+  // Smart actions: see + act in one step
+  clickElement,
+  waitFor,
   // Input control: mouse + keyboard
   inputMove,
   inputClick,
@@ -78,6 +89,10 @@ export const tools: NotiTool[] = [
   windowActive,
   windowFocus,
   windowMove,
+  // Process management
+  processList,
+  processStart,
+  processKill,
   // Clipboard
   clipboardRead,
   clipboardWrite,
