@@ -45,6 +45,7 @@
     "zod-to-json-schema": "^3.23.2"
   },
   "optionalDependencies": {
+    "ffmpeg-static": "^5.2.0",
     "node-window-manager": "^2.2.4",
     "sharp": "^0.33.4",
     "tesseract.js": "^5.1.0"
