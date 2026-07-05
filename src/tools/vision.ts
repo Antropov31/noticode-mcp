@@ -31,6 +31,13 @@ export async function grabScreen(display?: number): Promise<Buffer> {
   return screenshot({ screen: display, format: "png" });
 }
 
+/** Grab every connected display as separate PNG buffers (one per monitor). */
+export async function grabAllScreens(): Promise<Buffer[]> {
+  const screenshot = (await importOptional("screenshot-desktop", "Run `npm install`.")).default;
+  const all = await screenshot.all({ format: "png" });
+  return Array.isArray(all) ? all : [all];
+}
+
 /** Optionally crop to a region and/or downscale a PNG buffer using sharp. */
 export async function processImage(
   buf: Buffer,
@@ -54,6 +61,11 @@ export async function processImage(
     pipeline = pipeline.resize(Math.max(1, Math.round(baseW * scale)));
   }
   return pipeline.png().toBuffer();
+}
+
+/** Turn a PNG buffer into an MCP image the connected model can see directly. */
+export function toImage(buf: Buffer): ToolImage {
+  return { data: buf.toString("base64"), mimeType: "image/png" };
 }
 
 /** Run OCR over a PNG buffer and return words with bounding boxes. */
@@ -121,24 +133,43 @@ export async function findOnScreen(
 export const screenSee: NotiTool = {
   name: "screen_see",
   description:
-    "Look at the screen right now: capture a screenshot and return it as an image the agent can directly see. Call it repeatedly for near real-time vision, before clicking, and after an action to verify the result. Optionally crop to a region and/or downscale to save tokens.",
+    "Look at the screen right now: capture a screenshot and return it as an image the agent can directly see. Call it repeatedly for near real-time vision, before clicking, and after an action to verify the result. Optionally crop to a region, downscale to save tokens, or capture every monitor at once with all_displays.",
   schema: z.object({
     display: z.number().int().optional().describe("Display index for multi-monitor setups (default: primary)."),
+    all_displays: z.boolean().optional().describe("Capture every connected monitor and return one image per screen."),
     region: RegionSchema.optional().describe("Crop to this rectangle before returning."),
     scale: z
       .number()
       .optional()
       .describe("Downscale factor between 0 and 1 to shrink the image (e.g. 0.5 = half size). Default: 1 (full size)."),
-    save: z.boolean().optional().describe("Also save the PNG into the workspace and include its path."),
+    save: z.boolean().optional().describe("Also save the PNG(s) into the workspace and include the path(s)."),
   }),
   handler: async (args, ctx: ToolContext) => {
+    const dir = path.resolve(ctx.workspace, ".noticode", "captures");
+    if (args.save) await fsp.mkdir(dir, { recursive: true });
+
+    if (args.all_displays) {
+      const raws = await grabAllScreens();
+      const images: ToolImage[] = [];
+      const notes: string[] = [];
+      for (let i = 0; i < raws.length; i++) {
+        const buf = await processImage(raws[i], { scale: args.scale });
+        images.push(toImage(buf));
+        if (args.save) {
+          const file = path.join(dir, `see-all-${Date.now()}-${i}.png`);
+          await fsp.writeFile(file, buf);
+          notes.push(`display ${i} -> ${file}`);
+        }
+      }
+      const text = `Here are all ${images.length} displays.${notes.length ? "\nSaved:\n" + notes.join("\n") : ""}`;
+      return { text, images };
+    }
+
     const raw = await grabScreen(args.display);
     const buf = await processImage(raw, { region: args.region, scale: args.scale });
-    const image: ToolImage = { data: buf.toString("base64"), mimeType: "image/png" };
+    const image = toImage(buf);
     let text = "Here is the current screen.";
     if (args.save) {
-      const dir = path.resolve(ctx.workspace, ".noticode", "captures");
-      await fsp.mkdir(dir, { recursive: true });
       const file = path.join(dir, `see-${Date.now()}.png`);
       await fsp.writeFile(file, buf);
       text = `Here is the current screen. Saved to ${file}.`;
@@ -167,7 +198,7 @@ export const screenReadText: NotiTool = {
       .map((w) => toBox(w, args.region));
     if (!boxes.length) return "No readable text found on screen.";
     const lines = boxes.map(
-      (b) => `"${b.text}" @ (${b.center.x}, ${b.center.y}) [${b.x},${b.y} ${b.width}x${b.height}] conf ${b.confidence}`,
+      (b) => `\"${b.text}\" @ (${b.center.x}, ${b.center.y}) [${b.x},${b.y} ${b.width}x${b.height}] conf ${b.confidence}`,
     );
     const header = `Found ${boxes.length} text fragments (click any at its center point):`;
     return `${header}\n${lines.join("\n").slice(0, Math.max(0, ctx.maxOutputChars - header.length - 1))}`;
@@ -192,10 +223,10 @@ export const screenFind: NotiTool = {
       lang: args.lang,
       limit: args.limit,
     });
-    if (!matches.length) return `No on-screen match for "${args.query}".`;
+    if (!matches.length) return `No on-screen match for \"${args.query}\".`;
     const lines = matches.map(
-      (m, i) => `${i + 1}. "${m.text}" -> click (${m.center.x}, ${m.center.y}) [conf ${m.confidence}]`,
+      (m, i) => `${i + 1}. \"${m.text}\" -> click (${m.center.x}, ${m.center.y}) [conf ${m.confidence}]`,
     );
-    return `Matches for "${args.query}":\n${lines.join("\n")}`;
+    return `Matches for \"${args.query}\":\n${lines.join("\n")}`;
   },
 };
