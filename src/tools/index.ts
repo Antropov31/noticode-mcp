@@ -6,6 +6,7 @@ import { screenWatch } from "./screen-stream.js";
 import { screenSee, screenReadText, screenFind } from "./vision.js";
 import { screenFindImage } from "./ui-detect.js";
 import { screenRecord } from "./screen-record.js";
+import { windowSee } from "./window-see.js";
 import { clickElement, waitFor } from "./smart-actions.js";
 import {
   browserNavigate,
@@ -63,6 +64,7 @@ export const tools: NotiTool[] = [
   screenReadText,
   screenFind,
   screenFindImage,
+  windowSee,
   // Smart actions: see + act in one step
   clickElement,
   waitFor,
