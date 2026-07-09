@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { tools } from "../tools/index.js";
 import { buildToolContext } from "../tools/types.js";
+import type { ToolResult } from "../tools/types.js";
 import type { NotiConfig } from "../config.js";
 import { blue, sky, muted, banner } from "../theme.js";
 
@@ -14,94 +15,114 @@ Home Assistant devices.
 Be decisive: when the user asks for something, use your tools to actually do it instead of explaining how.
 Keep replies short. Operate inside the configured workspace unless told otherwise.`;
 
+function toolResultContent(result: ToolResult): any {
+ if (typeof result === "string") return result;
+ const content: any[] = [];
+ if (result.text) content.push({ type: "text", text: result.text });
+ for (const image of result.images ?? []) {
+ content.push({
+ type: "image",
+ source: {
+ type: "base64",
+ media_type: image.mimeType ?? "image/png",
+ data: image.data,
+ },
+ });
+ }
+ return content.length ? content : "(no output)";
+}
+
 export async function startChat(config: NotiConfig): Promise<void> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.error("Set ANTHROPIC_API_KEY to use chat mode.");
-    process.exit(1);
-  }
+ const apiKey = process.env.ANTHROPIC_API_KEY;
+ if (!apiKey) {
+ console.error("Set ANTHROPIC_API_KEY to use chat mode.");
+ process.exit(1);
+ }
 
-  const client = new Anthropic({ apiKey });
-  const ctx = buildToolContext(config);
+ const client = new Anthropic({ apiKey });
+ const ctx = buildToolContext(config);
 
-  const anthropicTools = tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: zodToJsonSchema(t.schema, { target: "openApi3" }) as any,
-  }));
+ const anthropicTools = tools.map((t) => ({
+ name: t.name,
+ description: t.description,
+ input_schema: zodToJsonSchema(t.schema, { target: "openApi3" }) as any,
+ }));
 
-  console.log(banner);
-  console.log(muted(`workspace: ${config.workspace} · model: ${config.model}`));
-  console.log(muted("type a request, or /exit to quit\n"));
+ console.log(banner);
+ console.log(muted(`workspace: ${config.workspace} · model: ${config.model}`));
+ console.log(muted("type a request, or /exit to quit\n"));
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const messages: Anthropic.MessageParam[] = [];
+ const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+ const messages: Anthropic.MessageParam[] = [];
 
-  const ask = (): void => {
-    rl.question(blue("you › "), async (line) => {
-      const input = line.trim();
-      if (input === "/exit" || input === "/quit") {
-        rl.close();
-        return;
-      }
-      if (!input) {
-        ask();
-        return;
-      }
-      messages.push({ role: "user", content: input });
-      try {
-        await runTurn(client, config, ctx, anthropicTools, messages);
-      } catch (e: any) {
-        console.error(muted(`⚠ ${e?.message ?? e}`));
-      }
-      ask();
-    });
-  };
+ const ask = (): void => {
+ rl.question(blue("you › "), async (line) => {
+ const input = line.trim();
+ if (input === "/exit" || input === "/quit") {
+ rl.close();
+ return;
+ }
+ if (!input) {
+ ask();
+ return;
+ }
+ messages.push({ role: "user", content: input });
+ try {
+ await runTurn(client, config, ctx, anthropicTools, messages);
+ } catch (e: any) {
+ console.error(muted(`⚠ ${e?.message ?? e}`));
+ }
+ ask();
+ });
+ };
 
-  ask();
+ ask();
 }
 
 async function runTurn(
-  client: Anthropic,
-  config: NotiConfig,
-  ctx: ReturnType<typeof buildToolContext>,
-  anthropicTools: any[],
-  messages: Anthropic.MessageParam[],
+ client: Anthropic,
+ config: NotiConfig,
+ ctx: ReturnType<typeof buildToolContext>,
+ anthropicTools: any[],
+ messages: Anthropic.MessageParam[],
 ): Promise<void> {
-  // Tool-use loop: keep going until the model stops asking for tools.
-  while (true) {
-    const res = await client.messages.create({
-      model: config.model,
-      max_tokens: 4096,
-      system: SYSTEM,
-      tools: anthropicTools,
-      messages,
-    });
+ // Tool-use loop: keep going until the model stops asking for tools.
+ while (true) {
+ const res = await client.messages.create({
+ model: config.model,
+ max_tokens: 4096,
+ system: SYSTEM,
+ tools: anthropicTools,
+ messages,
+ });
 
-    messages.push({ role: "assistant", content: res.content });
+ messages.push({ role: "assistant", content: res.content });
 
-    for (const block of res.content) {
-      if (block.type === "text" && block.text.trim()) {
-        console.log(sky("noti › ") + block.text.trim());
-      }
-    }
+ for (const block of res.content) {
+ if (block.type === "text" && block.text.trim()) {
+ console.log(sky("noti › ") + block.text.trim());
+ }
+ }
 
-    const toolUses = res.content.filter((c: any) => c.type === "tool_use") as any[];
-    if (toolUses.length === 0) return;
+ const toolUses = res.content.filter((c: any) => c.type === "tool_use") as any[];
+ if (toolUses.length === 0) return;
 
-    const results: any[] = [];
-    for (const tu of toolUses) {
-      const tool = tools.find((t) => t.name === tu.name);
-      console.log(muted(`  ⚙ ${tu.name} ${JSON.stringify(tu.input)}`));
-      let text: string;
-      try {
-        text = tool ? await tool.handler(tu.input, ctx) : `Unknown tool ${tu.name}`;
-      } catch (e: any) {
-        text = `Error: ${e?.message ?? e}`;
-      }
-      results.push({ type: "tool_result", tool_use_id: tu.id, content: text });
-    }
+ const results: any[] = [];
+ for (const tu of toolUses) {
+ const tool = tools.find((t) => t.name === tu.name);
+ console.log(muted(` ⚙ ${tu.name} ${JSON.stringify(tu.input)}`));
+ let content: any;
+ try {
+ const result: ToolResult = tool
+ ? await tool.handler(tu.input, ctx)
+ : `Unknown tool ${tu.name}`;
+ content = toolResultContent(result);
+ } catch (e: any) {
+ content = `Error: ${e?.message ?? e}`;
+ }
+ results.push({ type: "tool_result", tool_use_id: tu.id, content });
+ }
 
-    messages.push({ role: "user", content: results as any });
-  }
+ messages.push({ role: "user", content: results as any });
+ }
 }
