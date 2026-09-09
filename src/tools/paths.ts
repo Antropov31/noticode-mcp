@@ -11,7 +11,10 @@ function resolveLexically(ctx: ToolContext, input: string): string {
   if (!input.trim()) throw new Error("Path must not be empty.");
   const candidate = path.resolve(ctx.workspace, input);
   if (!isInside(path.resolve(ctx.workspace), candidate)) {
-    throw new Error(`Path must stay inside the workspace: ${input}`);
+    throw new Error(
+      `Path must stay inside the workspace (${ctx.workspace}): ${input}. ` +
+        "This rejection is the fs_* sandbox working as intended — use shell_exec for paths outside the workspace.",
+    );
   }
   return candidate;
 }

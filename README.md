@@ -123,6 +123,10 @@ Results are pushed to you via Telegram when configured. Example: "every weekday 
 | `NOTICODE_WORKSPACE` | `cwd` | Root directory the agent operates in. |
 | `NOTICODE_HOST` / `NOTICODE_PORT` | `127.0.0.1` / `4319` | HTTP server bind. |
 | `NOTICODE_TOKEN` | -- | Optional bearer token for the HTTP endpoint. |
+| `NOTICODE_ALLOWED_HOSTS` | -- | Host-header allowlist for HTTP mode (DNS-rebinding protection). Empty = allow all. |
+| `NOTICODE_ALLOWED_ORIGINS` | -- | Origin allowlist for HTTP mode (browser clients). Requests without `Origin` always pass. |
+| `NOTICODE_MAX_SESSIONS` | `32` | Max concurrent HTTP MCP sessions; new handshakes get `429` past the cap. |
+| `NOTICODE_SESSION_TTL_MS` | `1800000` | Idle HTTP sessions older than this are closed and evicted. |
 | `NOTICODE_MODEL` | `claude-sonnet-4-20250514` | Model for chat/telegram/all. |
 | `NOTICODE_ALLOW_SHELL` | `true` | `false` to block shell execution. |
 | `NOTICODE_ALLOW_WRITE` | `true` | `false` to make the agent read-only. |
@@ -135,6 +139,13 @@ Results are pushed to you via Telegram when configured. Example: "every weekday 
 ## Security
 
 NotiCode runs arbitrary commands, edits files, drives a browser, sees your screen and camera, and can control your home. That power is the point and the risk. Scope `NOTICODE_WORKSPACE` tightly, flip `NOTICODE_ALLOW_SHELL` / `NOTICODE_ALLOW_WRITE` to `false` when you only need read access, keep the HTTP bind on `127.0.0.1` and set `NOTICODE_TOKEN` before tunneling, and **always set `TELEGRAM_CHAT_ID`** so a stranger who finds your bot can't drive your machine.
+
+When you bind HTTP beyond localhost, also set `NOTICODE_ALLOWED_HOSTS` (Host-header allowlist against DNS rebinding) and `NOTICODE_ALLOWED_ORIGINS` (which browser origins may connect). `NOTICODE_MAX_SESSIONS` / `NOTICODE_SESSION_TTL_MS` bound resource usage per session.
+
+### Trust model: sandboxed files, privileged shell
+
+- `fs_read` / `fs_write` / `fs_edit` / `fs_list` / `fs_search` are **sandboxed to `NOTICODE_WORKSPACE`** (including symlink/junction escape checks). Paths outside the workspace are rejected with a `Path must stay inside the workspace` error — that rejection is the sandbox working, not a bug.
+- `shell_exec` is **deliberately privileged**: it starts in the workspace but, like a normal user terminal, can `cd` anywhere and run anything (including absolute paths and `git` commands outside the workspace). Treat shell access as full local-user access and gate it with `NOTICODE_ALLOW_SHELL=false` when you need a locked-down agent.
 
 ## Project structure
 

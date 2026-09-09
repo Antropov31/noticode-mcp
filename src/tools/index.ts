@@ -32,6 +32,8 @@ import {
 import { desktopOpen, desktopPower, desktopVolume } from "./desktop.js";
 import { windowList, windowActive, windowFocus, windowMove } from "./windows.js";
 import { processList, processStart, processKill } from "./process.js";
+import { gitRun } from "./git.js";
+import { computerVerifiedAction } from "./computer-verified-action.js";
 import { osStatus } from "./os-status.js";
 import { clipboardRead, clipboardWrite } from "./clipboard.js";
 import { micCapture, audioPlay } from "./audio.js";
@@ -66,6 +68,7 @@ export const tools: NotiTool[] = [
   // Smart actions: see + act in one step
   clickElement,
   waitFor,
+  computerVerifiedAction,
   // Input control: mouse + keyboard
   inputMove,
   inputClick,
@@ -93,6 +96,8 @@ export const tools: NotiTool[] = [
   processList,
   processStart,
   processKill,
+  // Version control (scoped to the workspace; destructive commands need force)
+  gitRun,
   // Clipboard
   clipboardRead,
   clipboardWrite,

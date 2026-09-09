@@ -3,10 +3,12 @@ import { loadConfig } from "./config.js";
 import { startMcpServer } from "./mcp/server.js";
 import { startHttpMcpServer } from "./mcp/http.js";
 import { startChat } from "./agent/agent.js";
+import { installSignalHandlers } from "./shutdown.js";
 import { banner } from "./theme.js";
 
 const cmd = process.argv[2] ?? "mcp";
 const config = loadConfig();
+installSignalHandlers();
 
 function fail(e: unknown): never {
   console.error(e);

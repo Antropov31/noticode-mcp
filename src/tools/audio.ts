@@ -4,6 +4,7 @@ import fsp from "node:fs/promises";
 import { z } from "zod";
 import type { NotiTool, ToolContext } from "./types.js";
 import { importOptional } from "./optional.js";
+import { resolveWorkspacePath } from "./paths.js";
 
 async function outPath(ctx: ToolContext, prefix: string, ext: string): Promise<string> {
   const dir = path.resolve(ctx.workspace, ".noticode", "audio");
@@ -41,11 +42,11 @@ export const micCapture: NotiTool = {
 export const audioPlay: NotiTool = {
   name: "audio_play",
   description: "Play an audio file (wav/mp3) through the host speakers.",
-  schema: z.object({ path: z.string().describe("Path to the audio file to play.") }),
+  schema: z.object({ path: z.string().describe("Path to the audio file to play (inside the workspace).") }),
   handler: async (args, ctx) => {
     const playerFactory = (await importOptional("play-sound", "Run `npm install`.")).default;
     const player = playerFactory({});
-    const full = path.resolve(ctx.workspace, args.path);
+    const full = await resolveWorkspacePath(ctx, args.path);
     await new Promise<void>((resolve, reject) => {
       player.play(full, (err: any) => (err ? reject(err) : resolve()));
     });

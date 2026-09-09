@@ -1,7 +1,7 @@
-import path from "node:path";
 import { z } from "zod";
 import type { NotiTool, ToolContext } from "./types.js";
 import { importOptional } from "./optional.js";
+import { resolveWorkspacePath } from "./paths.js";
 import { grabScreen, RegionSchema, type Region } from "./vision.js";
 
 interface Gray {
@@ -75,7 +75,7 @@ export const screenFindImage: NotiTool = {
     const screen = await toGray(screenBuf, scale);
 
     // Template -> grayscale, downscaled by the same factor.
-    const tplPath = path.resolve(ctx.workspace, args.template_path);
+    const tplPath = await resolveWorkspacePath(ctx, args.template_path);
     const tplBuf = await sharp(tplPath).png().toBuffer();
     const tpl = await toGray(tplBuf, scale);
 
