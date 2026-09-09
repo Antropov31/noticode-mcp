@@ -3,10 +3,8 @@ import path from "node:path";
 import fg from "fast-glob";
 import { z } from "zod";
 import type { NotiTool, ToolContext } from "./types.js";
-
-function resolve(ctx: ToolContext, p: string): string {
-  return path.resolve(ctx.workspace, p);
-}
+import { assertSafeGlob, resolveWorkspacePath } from "./paths.js";
+import { assertWriteAllowed, truncateText } from "./types.js";
 
 export const readFile: NotiTool = {
   name: "fs_read",
@@ -14,19 +12,22 @@ export const readFile: NotiTool = {
     "Read a UTF-8 text file. Returns the full content, or a line range when start_line/end_line are given.",
   schema: z.object({
     path: z.string().describe("File path, absolute or relative to the workspace."),
-    start_line: z.number().int().optional().describe("1-based first line to return."),
-    end_line: z.number().int().optional().describe("1-based last line to return."),
+    start_line: z.number().int().min(1).optional().describe("1-based first line to return."),
+    end_line: z.number().int().min(1).optional().describe("1-based last line to return."),
   }),
   handler: async (args, ctx) => {
-    const full = resolve(ctx, args.path);
+    if (args.start_line != null && args.end_line != null && args.end_line < args.start_line) {
+      throw new Error("end_line must be greater than or equal to start_line.");
+    }
+    const full = await resolveWorkspacePath(ctx, args.path);
     const raw = await fs.readFile(full, "utf8");
-    if (args.start_line || args.end_line) {
+    if (args.start_line != null || args.end_line != null) {
       const lines = raw.split("\n");
       const s = (args.start_line ?? 1) - 1;
       const e = args.end_line ?? lines.length;
-      return lines.slice(s, e).join("\n");
+      return truncateText(lines.slice(s, e).join("\n"), ctx.maxOutputChars);
     }
-    return raw.slice(0, ctx.maxOutputChars);
+    return truncateText(raw, ctx.maxOutputChars);
   },
 };
 
@@ -39,8 +40,8 @@ export const writeFile: NotiTool = {
     content: z.string(),
   }),
   handler: async (args, ctx) => {
-    if (!ctx.allowWrite) throw new Error("Writing is disabled (NOTICODE_ALLOW_WRITE=false).");
-    const full = resolve(ctx, args.path);
+    assertWriteAllowed(ctx);
+    const full = await resolveWorkspacePath(ctx, args.path, { allowMissing: true });
     await fs.mkdir(path.dirname(full), { recursive: true });
     await fs.writeFile(full, args.content, "utf8");
     return `Wrote ${args.content.length} bytes to ${full}`;
@@ -58,8 +59,9 @@ export const editFile: NotiTool = {
     replace_all: z.boolean().optional(),
   }),
   handler: async (args, ctx) => {
-    if (!ctx.allowWrite) throw new Error("Writing is disabled (NOTICODE_ALLOW_WRITE=false).");
-    const full = resolve(ctx, args.path);
+    assertWriteAllowed(ctx);
+    if (!args.old_string) throw new Error("old_string must not be empty.");
+    const full = await resolveWorkspacePath(ctx, args.path);
     const raw = await fs.readFile(full, "utf8");
     const count = raw.split(args.old_string).length - 1;
     if (count === 0) throw new Error("old_string was not found in the file.");
@@ -79,19 +81,20 @@ export const listDir: NotiTool = {
   description: "List files and directories under a path, up to a given depth.",
   schema: z.object({
     path: z.string().optional().describe("Directory to list (default: workspace root)."),
-    depth: z.number().int().optional().describe("How deep to recurse (default: 2)."),
+    depth: z.number().int().min(0).max(20).optional().describe("How deep to recurse (default: 2)."),
   }),
   handler: async (args, ctx) => {
-    const base = resolve(ctx, args.path ?? ".");
+    const base = await resolveWorkspacePath(ctx, args.path ?? ".");
     const entries = await fg("**/*", {
       cwd: base,
       deep: args.depth ?? 2,
       onlyFiles: false,
       dot: false,
       markDirectories: true,
+      followSymbolicLinks: false,
       ignore: ["**/node_modules/**", "**/.git/**"],
     });
-    return entries.slice(0, 500).join("\n") || "(empty)";
+    return truncateText(entries.slice(0, 500).join("\n") || "(empty)", ctx.maxOutputChars);
   },
 };
 
@@ -104,16 +107,20 @@ export const search: NotiTool = {
     query: z.string().optional().describe("Substring to search for inside matched files."),
   }),
   handler: async (args, ctx) => {
-    const files = await fg(args.glob ?? "**/*", {
+    const pattern = args.glob ?? "**/*";
+    assertSafeGlob(pattern);
+    const files = await fg(pattern, {
       cwd: ctx.workspace,
       ignore: ["**/node_modules/**", "**/.git/**"],
       dot: false,
+      followSymbolicLinks: false,
     });
-    if (!args.query) return files.slice(0, 200).join("\n") || "(no matches)";
+    if (!args.query) return truncateText(files.slice(0, 200).join("\n") || "(no matches)", ctx.maxOutputChars);
     const hits: string[] = [];
     for (const f of files.slice(0, 2000)) {
       try {
-        const raw = await fs.readFile(path.resolve(ctx.workspace, f), "utf8");
+        const full = await resolveWorkspacePath(ctx, f);
+        const raw = await fs.readFile(full, "utf8");
         raw.split("\n").forEach((ln, i) => {
           if (ln.includes(args.query!)) hits.push(`${f}:${i + 1}: ${ln.trim().slice(0, 200)}`);
         });
@@ -122,6 +129,6 @@ export const search: NotiTool = {
       }
       if (hits.length > 200) break;
     }
-    return hits.join("\n") || "(no matches)";
+    return truncateText(hits.join("\n") || "(no matches)", ctx.maxOutputChars);
   },
 };

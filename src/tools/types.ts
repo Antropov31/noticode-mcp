@@ -33,6 +33,22 @@ export interface NotiTool {
   handler: (args: any, ctx: ToolContext) => Promise<ToolResult>;
 }
 
+export function assertWriteAllowed(ctx: ToolContext): void {
+  if (!ctx.allowWrite) throw new Error("This action is disabled (NOTICODE_ALLOW_WRITE=false). Read-only mode is active.");
+}
+
+export function assertShellAllowed(ctx: ToolContext): void {
+  if (!ctx.allowShell) throw new Error("Shell execution is disabled (NOTICODE_ALLOW_SHELL=false).");
+  if (!ctx.allowWrite) throw new Error("Shell execution is disabled while read-only mode is active.");
+}
+
+export function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const suffix = "\n...[truncated]";
+  if (maxChars <= suffix.length) return text.slice(0, maxChars);
+  return text.slice(0, maxChars - suffix.length) + suffix;
+}
+
 /** Build a ToolContext from config so every entry point wires tools identically. */
 export function buildToolContext(config: NotiConfig): ToolContext {
   return {

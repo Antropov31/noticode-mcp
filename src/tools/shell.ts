@@ -2,6 +2,8 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { NotiTool } from "./types.js";
+import { assertShellAllowed, truncateText } from "./types.js";
+import { resolveWorkspacePath } from "./paths.js";
 
 const pexec = promisify(exec);
 
@@ -12,22 +14,23 @@ export const shellExec: NotiTool = {
   schema: z.object({
     command: z.string().describe("The shell command to execute."),
     cwd: z.string().optional().describe("Working directory (default: workspace)."),
-    timeout_ms: z.number().int().optional().describe("Kill the command after this many ms (default: 120000)."),
+    timeout_ms: z.number().int().min(1).max(15 * 60 * 1000).optional().describe("Kill the command after this many ms (default: 120000)."),
   }),
   handler: async (args, ctx) => {
-    if (!ctx.allowShell) throw new Error("Shell execution is disabled (NOTICODE_ALLOW_SHELL=false).");
+    assertShellAllowed(ctx);
+    const cwd = await resolveWorkspacePath(ctx, args.cwd || ".");
     try {
       const { stdout, stderr } = await pexec(args.command, {
-        cwd: args.cwd || ctx.workspace,
+        cwd,
         timeout: args.timeout_ms ?? 120000,
         maxBuffer: 10 * 1024 * 1024,
         shell: process.platform === "win32" ? undefined : "/bin/bash",
       });
       const out = [stdout, stderr].filter(Boolean).join("\n").trim();
-      return out.slice(0, ctx.maxOutputChars) || "(no output)";
+      return truncateText(out || "(no output)", ctx.maxOutputChars);
     } catch (e: any) {
       const body = `Command failed (exit ${e.code ?? "?"}):\n${e.stdout || ""}\n${e.stderr || e.message || ""}`;
-      return body.slice(0, ctx.maxOutputChars);
+      return truncateText(body, ctx.maxOutputChars);
     }
   },
 };

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { promisify } from "node:util";
 import { exec as _exec } from "node:child_process";
 import type { NotiTool } from "./types.js";
+import { assertWriteAllowed } from "./types.js";
 
 const exec = promisify(_exec);
 
@@ -20,7 +21,8 @@ export const desktopOpen: NotiTool = {
     as_app: z.boolean().optional().describe("Treat target as an application to launch rather than a document."),
     args: z.array(z.string()).optional().describe("Extra arguments to pass to the launched app."),
   }),
-  handler: async (args) => {
+  handler: async (args, ctx) => {
+    assertWriteAllowed(ctx);
     const extra = (args.args ?? []).map(q).join(" ");
     let cmd: string;
     if (process.platform === "darwin") {
@@ -44,7 +46,8 @@ export const desktopPower: NotiTool = {
   schema: z.object({
     action: z.enum(["lock", "sleep", "shutdown", "restart", "logout"]).describe("Power action to perform."),
   }),
-  handler: async (args) => {
+  handler: async (args, ctx) => {
+    assertWriteAllowed(ctx);
     const p = process.platform;
     const table: Record<string, Record<string, string>> = {
       darwin: {
@@ -85,7 +88,8 @@ export const desktopVolume: NotiTool = {
     level: z.number().int().min(0).max(100).optional().describe("Volume percentage 0-100."),
     mute: z.boolean().optional().describe("true to mute, false to unmute."),
   }),
-  handler: async (args) => {
+  handler: async (args, ctx) => {
+    assertWriteAllowed(ctx);
     if (args.level == null && args.mute == null)
       throw new Error("Provide level and/or mute.");
     const p = process.platform;
