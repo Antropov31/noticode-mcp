@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { z } from "zod";
 import type { NotiTool, ToolContext } from "./types.js";
 import { importOptional } from "./optional.js";
+import { processImage, toImage } from "./vision.js";
 
 async function outPath(ctx: ToolContext, prefix: string): Promise<string> {
   const dir = path.resolve(ctx.workspace, ".noticode", "captures");
@@ -13,15 +14,19 @@ async function outPath(ctx: ToolContext, prefix: string): Promise<string> {
 export const screenCapture: NotiTool = {
   name: "screen_capture",
   description:
-    "Take a screenshot of the host's screen and save it as a PNG. Returns the file path.",
+    "Take a screenshot of the host's screen and save it as a PNG. Returns the file path. Set `see: true` to also return the screenshot as an inline image the agent can directly see.",
   schema: z.object({
     display: z.number().int().optional().describe("Display index for multi-monitor setups (default: primary)."),
+    see: z.boolean().optional().describe("Also return the screenshot as an inline image the model can see."),
+    scale: z.number().optional().describe("Downscale factor 0-1 for the inline image (default: 1)."),
   }),
   handler: async (args, ctx) => {
     const screenshot = (await importOptional("screenshot-desktop", "Run `npm install`.")).default;
     const file = await outPath(ctx, "screen");
-    await screenshot({ filename: file, screen: args.display });
-    return file;
+    const buf: Buffer = await screenshot({ filename: file, screen: args.display, format: "png" });
+    if (!args.see) return file;
+    const small = await processImage(buf, { scale: args.scale });
+    return { text: `Saved to ${file}.`, images: [toImage(small)] };
   },
 };
 
