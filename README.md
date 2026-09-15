@@ -1,195 +1,226 @@
+# AntroSwarm
 
-# NotiCode
+A shared coordination MCP for **multiple independent AI coding chats** plus an **outbound local runner** for your PC.
 
-**The blue, MCP-native AI agent for your whole machine.**
+The target workflow is intentionally different from a normal multi-agent CLI. You manually open 2–8 ordinary ChatGPT/Codex/Claude sessions, connect all of them to the **same AntroSwarm MCP**, give them the same project goal, and let them become distinct logical agents inside one swarm.
 
-Runs as an MCP server so Claude (or any MCP client) can plug in, chat, and let it edit files and drive your machine. DM it on Telegram. Or run **everything at once** and control one shared agent from your MCP client *and* your phone.
-
----
-
-## What is this?
-
-NotiCode is an open AI agent in the spirit of OpenCode and Claude Code, with one twist: **it speaks [MCP](https://modelcontextprotocol.io) first.**
-
-It has hands. It can read/write files, run shell commands, inspect your system, **drive a headless browser**, **take screenshots and webcam photos**, **control your Home Assistant smart home**, **schedule recurring jobs**, and **message you on Telegram** (text and photos). Connect it to an MCP client, talk to it in your terminal, or DM the Telegram bot, all backed by the same toolset.
-
-It is blue. Not orange. On purpose.
-
-## The one-command setup: `all`
-
-```bash
-node dist/index.js all
-# or: npm run all
+```text
+ Chat A ─┐
+ Chat B ─┼──────────────┐
+ Chat C ─┤              │ Streamable HTTP MCP
+ Chat D ─┘              ▼
+                    AntroSwarm Cloud
+            ┌────────────┼────────────┐
+            │ tasks/mail │ locks/RFCs │ memory/barriers
+            └────────────┼────────────┘
+                         │ WebSocket (outbound from your PC)
+                         ▼
+                   AntroSwarm Runner
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+      worktree A     worktree B     worktree C ...
+          │              │              │
+          └──────────────┴──────────────┘
+                    your Git repo
 ```
 
-This boots **everything in a single process**:
+The PC never needs an inbound port, public IP, ngrok, or Cloudflare Tunnel. The local runner connects **outbound** to the public coordination server and waits for structured commands.
 
-- the **HTTP MCP server** (prints a URL you paste into any MCP client),
-- the **Telegram bot** (DM it from your phone),
-- the **scheduler** (cron jobs that notify you when done).
+## What is already in the MVP
 
-They all share the same tools and workspace. So you can text the bot "измени мои файлы" / "edit my files and run the tests", *or* type the same thing into an MCP client, and the same agent does the work on the same machine. Needs `ANTHROPIC_API_KEY` (for the bot) and `TELEGRAM_BOT_TOKEN` (to enable Telegram); the HTTP server and scheduler run even without them.
+- one shared MCP endpoint for many normal chat sessions;
+- `swarm_join`: every chat gets a separate logical `agent_id` + secret token;
+- compact `swarm_sync` snapshot to reduce context/token waste;
+- dependency-aware tasks with atomic claims;
+- durable typed agent-to-agent mail/broadcasts;
+- file/glob reservations with TTL and conflict rejection;
+- write-time reservation enforcement for runner file edits;
+- architecture proposals, voting, quorum resolution;
+- non-blocking synchronization barriers;
+- shared project memory;
+- agent presence/heartbeats;
+- outbound WebSocket local runner;
+- isolated Git worktree per agent/task;
+- structured local file read/write/edit/list;
+- structured Git status/diff/commit/push;
+- configurable build command;
+- optional generic execution, **disabled by default**;
+- JSON persistence with atomic file replacement;
+- CI + core coordination tests.
 
-## Do I need an API key?
+## 1. Run the cloud MCP
 
-- `noticode mcp` / `noticode serve` -- **no key.** NotiCode is just the *hands*; the MCP client you connect brings the *brain*.
-- `noticode chat` / `noticode telegram` / `noticode all` -- needs `ANTHROPIC_API_KEY`, because here NotiCode calls the model itself.
-
-## Modes
-
-| Command | What it does | Needs key? |
-| --- | --- | --- |
-| `all` | HTTP MCP + Telegram bot + scheduler, one process, shared agent. | Yes (for bot) |
-| `mcp` | MCP server over stdio (connect Claude Desktop). | No |
-| `serve` | MCP server over HTTP, prints a connectable URL. | No |
-| `chat` | Interactive terminal agent. | Yes |
-| `telegram` | Telegram bot only. | Yes |
-
-## Quick start
+Use an always-reachable Node host (Railway, Fly.io, Render, a small VPS, Docker host, etc.). The important part is that **only the cloud service is public**.
 
 ```bash
-git clone https://github.com/Antropov31/noticode-mcp.git
-cd noticode-mcp
 npm install
-npx playwright install chromium   # only if you want the browser_* tools
 npm run build
-cp .env.example .env               # fill in keys you want to use
+cp .env.example .env
 ```
 
-Then pick a mode, e.g. the full stack:
+Set at minimum:
+
+```env
+ANTRO_HOST=0.0.0.0
+ANTRO_PORT=4320
+ANTRO_RUNNER_TOKEN=a-long-random-secret
+ANTRO_MCP_TOKEN=
+```
+
+Then:
 
 ```bash
-npm run all
+npm start
 ```
 
-### Connect Claude Desktop (stdio)
+Endpoints:
 
-Add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "noticode": {
-      "command": "node",
-      "args": ["/absolute/path/to/noticode-mcp/dist/index.js", "mcp"],
-      "env": { "NOTICODE_WORKSPACE": "/absolute/path/to/your/project" }
-    }
-  }
-}
+```text
+GET  /health
+POST /mcp       Streamable HTTP MCP
+GET  /mcp       MCP stream/session transport
+WS   /runner    local runner connection
 ```
 
-### Connect by URL (HTTP)
+If your MCP client supports bearer authentication, set `ANTRO_MCP_TOKEN`. For an initial private test you can leave it empty, but do **not** expose an unauthenticated production endpoint publicly.
 
-`npm run serve` (or `all`) prints something like `http://127.0.0.1:4319/mcp`. Paste it into any MCP client that supports the HTTP (Streamable HTTP) transport.
+### Docker
 
-### Telegram
-
-1. Create a bot with [@BotFather](https://t.me/BotFather), put the token in `TELEGRAM_BOT_TOKEN`.
-2. (Recommended) Get your chat ID from [@userinfobot](https://t.me/userinfobot) and set `TELEGRAM_CHAT_ID` to lock the bot to just you.
-3. `npm run telegram` (or `npm run all`). Text the bot. `/start` and `/reset` are supported.
-
-## Tools
-
-| Tool | What it does |
-| --- | --- |
-| `fs_read` / `fs_write` / `fs_edit` | Read, create/overwrite, exact-match edit files. |
-| `fs_list` / `fs_search` | List dirs; glob + grep file contents. |
-| `shell_exec` | Run any shell command on the host. |
-| `sys_info` | OS, CPU, memory, user, workspace. |
-| `tg_send` / `tg_send_photo` / `tg_read` | Message the user on Telegram (text/photo), read incoming messages. |
-| `notify` | Send a task/event notification (via Telegram, or logged). |
-| `ha_states` / `ha_call_service` | List Home Assistant entities; control devices and scenes. |
-| `browser_navigate` / `browser_click` / `browser_type` / `browser_eval` / `browser_screenshot` | Drive a headless Playwright browser. |
-| `screen_capture` / `webcam_capture` | Screenshot the desktop / snap a webcam photo (saved as PNG). |
-| `schedule_add` / `schedule_list` / `schedule_cancel` | Cron jobs that run a command, an agent prompt, or a reminder. |
-
-Image tools save a PNG and return its path; send it on with `tg_send_photo`. All tools are defined once in `src/tools/` and shared by every mode.
-
-## Scheduler
-
-`schedule_add` takes a cron expression and a job `type`:
-
-- `shell` -- run a command; you get the output when it finishes.
-- `prompt` -- run an agent instruction (only in `all`/`chat` with an API key).
-- `notify` -- a plain reminder.
-
-Results are pushed to you via Telegram when configured. Example: "every weekday at 9am, pull the repo and run tests" becomes a `shell` job on `0 9 * * 1-5`.
-
-## Configuration
-
-| Env var | Default | Purpose |
-| --- | --- | --- |
-| `ANTHROPIC_API_KEY` | -- | Required for chat / telegram / all. |
-| `NOTICODE_WORKSPACE` | `cwd` | Root directory the agent operates in. |
-| `NOTICODE_HOST` / `NOTICODE_PORT` | `127.0.0.1` / `4319` | HTTP server bind. |
-| `NOTICODE_TOKEN` | -- | Optional bearer token for the HTTP endpoint. |
-| `NOTICODE_ALLOWED_HOSTS` | -- | Host-header allowlist for HTTP mode (DNS-rebinding protection). Empty = allow all. |
-| `NOTICODE_ALLOWED_ORIGINS` | -- | Origin allowlist for HTTP mode (browser clients). Requests without `Origin` always pass. |
-| `NOTICODE_MAX_SESSIONS` | `32` | Max concurrent HTTP MCP sessions; new handshakes get `429` past the cap. |
-| `NOTICODE_SESSION_TTL_MS` | `1800000` | Idle HTTP sessions older than this are closed and evicted. |
-| `NOTICODE_MODEL` | `claude-sonnet-4-20250514` | Model for chat/telegram/all. |
-| `NOTICODE_ALLOW_SHELL` | `true` | `false` to block shell execution. |
-| `NOTICODE_ALLOW_WRITE` | `true` | `false` to make the agent read-only. |
-| `NOTICODE_MAX_OUTPUT` | `30000` | Max chars returned per tool call. |
-| `TELEGRAM_BOT_TOKEN` | -- | Bot token from @BotFather. |
-| `TELEGRAM_CHAT_ID` | -- | Lock the bot to one chat; default notify target. |
-| `HOME_ASSISTANT_URL` | -- | Base URL of your Home Assistant. |
-| `HOME_ASSISTANT_TOKEN` | -- | Long-lived access token for Home Assistant. |
-
-## Security
-
-NotiCode runs arbitrary commands, edits files, drives a browser, sees your screen and camera, and can control your home. That power is the point and the risk. Scope `NOTICODE_WORKSPACE` tightly, flip `NOTICODE_ALLOW_SHELL` / `NOTICODE_ALLOW_WRITE` to `false` when you only need read access, keep the HTTP bind on `127.0.0.1` and set `NOTICODE_TOKEN` before tunneling, and **always set `TELEGRAM_CHAT_ID`** so a stranger who finds your bot can't drive your machine.
-
-When you bind HTTP beyond localhost, also set `NOTICODE_ALLOWED_HOSTS` (Host-header allowlist against DNS rebinding) and `NOTICODE_ALLOWED_ORIGINS` (which browser origins may connect). `NOTICODE_MAX_SESSIONS` / `NOTICODE_SESSION_TTL_MS` bound resource usage per session.
-
-### Trust model: sandboxed files, privileged shell
-
-- `fs_read` / `fs_write` / `fs_edit` / `fs_list` / `fs_search` are **sandboxed to `NOTICODE_WORKSPACE`** (including symlink/junction escape checks). Paths outside the workspace are rejected with a `Path must stay inside the workspace` error — that rejection is the sandbox working, not a bug.
-- `shell_exec` is **deliberately privileged**: it starts in the workspace but, like a normal user terminal, can `cd` anywhere and run anything (including absolute paths and `git` commands outside the workspace). Treat shell access as full local-user access and gate it with `NOTICODE_ALLOW_SHELL=false` when you need a locked-down agent.
-
-## Project structure
-
-```
-src/
-  index.ts              CLI entry (all | mcp | serve | chat | telegram | help)
-  config.ts             Env-based configuration
-  theme.ts              Blue terminal palette + banner
-  runner/
-    all.ts              Unified mode: HTTP MCP + Telegram bot + scheduler
-  mcp/
-    server.ts           buildMcpServer + stdio entry point
-    http.ts             Streamable HTTP entry point (prints a URL)
-  agent/
-    core.ts             Shared agent loop (model + tool-use)
-    agent.ts            Interactive terminal chat
-    telegram-bot.ts     Telegram bot bridge to the agent loop
-  scheduler/
-    scheduler.ts        Cron scheduler runtime
-  tools/
-    index.ts            Tool registry
-    types.ts            Shared tool + context types
-    filesystem.ts       fs_read / fs_write / fs_edit / fs_list / fs_search
-    shell.ts            shell_exec
-    system.ts           sys_info
-    telegram.ts         tg_send / tg_send_photo / tg_read
-    notify.ts           notify
-    home-assistant.ts   ha_states / ha_call_service
-    browser.ts          browser_navigate / click / type / eval / screenshot
-    capture.ts          screen_capture / webcam_capture
-    scheduler.ts        schedule_add / schedule_list / schedule_cancel
+```bash
+docker build -t antroswarm .
+docker run --rm -p 4320:4320 \
+  -e ANTRO_RUNNER_TOKEN=change-me \
+  -v antroswarm-data:/app/.antroswarm \
+  antroswarm
 ```
 
-## Roadmap
+## 2. Run the local PC runner
 
-- [x] HTTP / Streamable HTTP transport in addition to stdio
-- [x] Telegram bot bridge
-- [x] Unified `all` mode
-- [x] Browser automation, screen/webcam capture, Home Assistant, scheduler
-- [ ] Streaming responses in chat mode
-- [ ] Pluggable LLM providers (OpenAI, local models)
-- [ ] Per-tool permission prompts
-- [ ] Git-aware diffs before writes
+Clone AntroSwarm on the machine that contains the project and set:
+
+```env
+ANTRO_CLOUD_URL=https://swarm.example.com
+ANTRO_RUNNER_TOKEN=the-same-secret
+ANTRO_WORKSPACE=D:\\downloads\\HollowSignal
+ANTRO_RUNNER_ID=antropov-pc
+ANTRO_BASE_REF=origin/main
+ANTRO_BUILD_COMMAND=gradlew.bat clean build
+```
+
+Then:
+
+```bash
+npm run build
+npm run runner
+```
+
+The runner dials `wss://swarm.example.com/runner` itself. Nothing connects directly to your PC.
+
+## 3. Connect ChatGPT
+
+Add the cloud `/mcp` URL as one remote MCP app. You do **not** need four separate identities/apps like aweb.
+
+Open four normal chats. Give each chat the same bootstrap prompt from [`docs/AGENT_PROMPT.md`](docs/AGENT_PROMPT.md).
+
+Each chat calls:
+
+```text
+swarm_join(
+  swarm_id="hollowsignal-7",
+  expected_agents=4,
+  goal="Improve HollowSignal together",
+  repo="Antropov31/HollowSignal"
+)
+```
+
+and gets a different identity automatically:
+
+```text
+Chat A -> agent-81aecc12
+Chat B -> agent-f043117c
+Chat C -> agent-972ceb40
+Chat D -> agent-0923fbca
+```
+
+The `agent_token` returned by `swarm_join` is the credential for that chat. It should stay in that chat and be supplied to later AntroSwarm calls.
+
+## 4. Recommended swarm protocol
+
+A useful four-agent run looks like this:
+
+```text
+JOIN
+  ↓
+independent repository analysis
+  ↓
+swarm_barrier(stage="analysis", expected=4)
+  ↓
+read all analyses / create task DAG
+  ↓
+atomic task claims
+  ↓
+path reservations
+  ↓
+runner_prepare_worktree
+  ↓
+parallel implementation
+  ↕
+mail / RFC proposals / dependency messages
+  ↓
+cross-review
+  ↓
+build
+  ↓
+commit + push each branch
+  ↓
+integration / PRs
+```
+
+`swarm_barrier` does not hold an HTTP call open for minutes. It returns `waiting` or `released`; agents can do safe read-only work and poll it later.
+
+## 5. File ownership model
+
+Example:
+
+```text
+Agent A reserves: src/main/java/**/entity/**
+Agent B reserves: src/main/java/**/client/**
+```
+
+A conflicting reservation is rejected. More importantly, if Agent B tries `runner_write` on a path matched by Agent A's active reservation, the coordinator rejects the write **before the PC runner sees it**.
+
+Agents should still use separate worktrees. Locks prevent conceptual overlap; worktrees prevent physical overwrites.
+
+## 6. Local runner security
+
+The first version intentionally does **not** expose your old NotiCode-style unrestricted `shell_exec` by default.
+
+Structured actions are provided for filesystem, Git, worktrees and builds. Generic `runner_exec` requires:
+
+```env
+ANTRO_RUNNER_ALLOW_EXEC=true
+```
+
+and is still filtered by `ANTRO_RUNNER_ALLOWED_PREFIXES` plus simple shell-control/path-escape checks. This is a convenience guard, not a VM sandbox. Keep the runner under a dedicated OS account or VM if you need a stronger trust boundary.
+
+See [`SECURITY.md`](SECURITY.md).
+
+## Current limitations / next steps
+
+This is an MVP intended to test the exact workflow before building a large platform.
+
+- logical agent credentials are currently returned to the model and supplied explicitly on later tool calls;
+- JSON persistence is single-process; move to Postgres/SQLite/WAL before horizontal scaling;
+- file reservation overlap detection is deliberately conservative;
+- agents cannot wake an already-finished ChatGPT turn; they must poll/sync during their active turn;
+- PR creation is expected to use the chat's GitHub connector or normal GitHub tooling after `runner_git_push`;
+- no web dashboard yet;
+- no OAuth provider yet;
+- no automatic lead process: coordination is distributed by default.
+
+The point of v0.1 is to validate whether four independent ordinary chat sessions can actually cooperate productively on one real repository without a human copying messages between them.
 
 ## License
 
-MIT © Antropov31
+MIT. See [LICENSE](LICENSE).

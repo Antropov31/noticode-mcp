@@ -1,17 +1,6 @@
 node_modules/
 dist/
 .env
-.env.local
+.antroswarm/
 *.log
-npm-debug.log*
 .DS_Store
-.idea/
-.vscode/
-coverage/
-
-# NotiCode runtime captures / recordings
-.noticode/
-
-# Local Tesseract OCR language data (tesseract.js fetches/caches its own;
-# 5-10MB *.traineddata blobs must not be committed at the repo root)
-*.traineddata

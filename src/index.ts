@@ -1,69 +1,27 @@
 #!/usr/bin/env node
-import { loadConfig } from "./config.js";
-import { startMcpServer } from "./mcp/server.js";
-import { startHttpMcpServer } from "./mcp/http.js";
-import { startChat } from "./agent/agent.js";
-import { installSignalHandlers } from "./shutdown.js";
-import { banner } from "./theme.js";
+import { loadCloudConfig, loadRunnerConfig } from "./config.js";
+import { startCloud } from "./http.js";
+import { LocalRunner } from "./runner/local.js";
 
-const cmd = process.argv[2] ?? "mcp";
-const config = loadConfig();
-installSignalHandlers();
+const command = process.argv[2] ?? "serve";
 
-function fail(e: unknown): never {
-  console.error(e);
-  process.exit(1);
+async function main(): Promise<void> {
+  if (command === "serve" || command === "cloud") {
+    await startCloud(loadCloudConfig());
+    return;
+  }
+  if (command === "runner") {
+    const config = loadRunnerConfig();
+    console.log(`AntroSwarm runner '${config.runnerId}' connecting to ${config.cloudUrl}`);
+    console.log(`Workspace: ${config.workspace}`);
+    console.log(`Worktrees: ${config.worktreeRoot}`);
+    await new LocalRunner(config).start();
+  }
+  if (["help", "--help", "-h"].includes(command)) {
+    console.log(`AntroSwarm\n\n  antroswarm serve   Start public Streamable HTTP MCP + runner websocket\n  antroswarm runner  Start outbound local PC runner\n\nSee README.md and .env.example.`);
+    return;
+  }
+  throw new Error(`Unknown command: ${command}`);
 }
 
-switch (cmd) {
-  case "mcp":
-    startMcpServer(config).catch(fail);
-    break;
-
-  case "serve":
-  case "http":
-    startHttpMcpServer(config).catch(fail);
-    break;
-
-  case "chat":
-    startChat(config).catch(fail);
-    break;
-
-  case "version":
-  case "--version":
-  case "-v":
-    console.log("noticode 0.1.0");
-    break;
-
-  case "help":
-  case "--help":
-  case "-h":
-  default:
-    console.log(banner);
-    console.log(
-      [
-        "Usage: noticode <command>",
-        "",
-        "Commands:",
-        "  mcp      Start the MCP server on stdio (default). Connect Claude or any MCP client.",
-        "  serve    Start the MCP server over HTTP and print a connectable URL (alias: http).",
-        "  chat     Start the interactive terminal chat agent.",
-        "  version  Print the version.",
-        "  help     Show this help.",
-        "",
-        "Env:",
-        "  ANTHROPIC_API_KEY     Required for chat mode (not needed for mcp/serve).",
-        "  NOTICODE_WORKSPACE    Root directory the agent operates in (default: cwd).",
-        "  NOTICODE_MODEL        Anthropic model (default: claude-sonnet-4-20250514).",
-        "  NOTICODE_ALLOW_SHELL  'false' to disable shell execution.",
-        "  NOTICODE_ALLOW_WRITE  'false' to disable file writes.",
-        "  NOTICODE_HOST         Host to bind for `serve` (default: 127.0.0.1).",
-        "  NOTICODE_PORT         Port for `serve` (default: 4319).",
-        "  NOTICODE_TOKEN        Optional Bearer token required by `serve`.",
-        "  HOME_ASSISTANT_URL    Home Assistant base URL (enables ha_* tools).",
-        "  HOME_ASSISTANT_TOKEN  Home Assistant long-lived access token.",
-        "",
-      ].join("\n"),
-    );
-    break;
-}
+main().catch((error) => { console.error(error); process.exit(1); });
