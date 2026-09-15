@@ -6,6 +6,7 @@ export interface AgentRecord {
   id: string;
   displayName: string;
   authHash: string;
+  joinKeyHash?: string;
   joinedAt: number;
   lastSeenAt: number;
   currentTaskId?: string;
