@@ -38,7 +38,9 @@ export async function startCloud(config: CloudConfig): Promise<void> {
     } else if (!sessionId && isInitializeRequest(req.body)) {
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (sid) => sessions.set(sid, { transport, lastSeen: Date.now() }),
+        onsessioninitialized: (sid) => {
+          sessions.set(sid, { transport, lastSeen: Date.now() });
+        },
       });
       transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
       await buildMcpServer(coordinator, runners).connect(transport);
