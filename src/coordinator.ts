@@ -56,7 +56,7 @@ export class Coordinator {
     return swarm;
   }
 
-  async join(input: { swarmId: string; displayName?: string; goal?: string; repo?: string; expectedAgents?: number }) {
+  async join(input: { swarmId: string; displayName?: string; goal?: string; repo?: string; expectedAgents?: number; joinKey?: string }) {
     return this.store.transaction((state) => {
       let swarm = state.swarms[input.swarmId];
       if (!swarm) {
@@ -74,11 +74,44 @@ export class Coordinator {
         if (input.repo && !swarm.repo) swarm.repo = input.repo;
         if (input.expectedAgents && !swarm.expectedAgents) swarm.expectedAgents = input.expectedAgents;
       }
+
+      const joinKeyHash = input.joinKey?.trim() ? hash(input.joinKey.trim()) : undefined;
+      if (joinKeyHash) {
+        const existing = swarm.agents.find((agent) => agent.joinKeyHash === joinKeyHash);
+        if (existing) {
+          const token = randomBytes(24).toString("base64url");
+          existing.authHash = hash(token);
+          existing.lastSeenAt = now();
+          if (input.displayName?.trim()) existing.displayName = input.displayName.trim();
+          swarm.updatedAt = now();
+          return {
+            swarmId: swarm.id,
+            agentId: existing.id,
+            agentToken: token,
+            displayName: existing.displayName,
+            goal: swarm.goal,
+            repo: swarm.repo,
+            expectedAgents: swarm.expectedAgents,
+            resumed: true,
+            instructions: [
+              "This join resumed an existing logical agent because the same join_key was reused.",
+              "Keep agentId/agentToken private to this chat and include them in later AntroSwarm tool calls.",
+              "Call swarm_sync regularly, especially before claiming work and before finishing a turn.",
+            ],
+          };
+        }
+      }
+
+      if (swarm.expectedAgents && swarm.agents.length >= swarm.expectedAgents) {
+        throw new Error(`Swarm ${swarm.id} is full (${swarm.agents.length}/${swarm.expectedAgents}). Reuse the same join_key to resume an existing agent or increase expected_agents before launch.`);
+      }
+
       const token = randomBytes(24).toString("base64url");
       const agent: AgentRecord = {
         id: id("agent"),
         displayName: input.displayName?.trim() || `agent-${swarm.agents.length + 1}`,
         authHash: hash(token),
+        joinKeyHash,
         joinedAt: now(),
         lastSeenAt: now(),
       };
@@ -92,8 +125,11 @@ export class Coordinator {
         goal: swarm.goal,
         repo: swarm.repo,
         expectedAgents: swarm.expectedAgents,
+        resumed: false,
+        warnings: joinKeyHash ? [] : ["No join_key supplied. A retried swarm_join may create a duplicate logical agent."],
         instructions: [
           "Keep agentId/agentToken private to this chat and include them in later AntroSwarm tool calls.",
+          "For reconnect-safe joins, generate one random join_key per chat and reuse it on every swarm_join retry.",
           "Call swarm_sync regularly, especially before claiming work and before finishing a turn.",
           "Claim a task before implementation. Reserve overlapping paths before writes.",
           "Use messages/proposals for dependencies and architectural conflicts instead of silently editing shared code.",
@@ -112,7 +148,7 @@ export class Coordinator {
       const readyTasks = swarm.tasks.filter((task) => task.status === "open" && task.dependencies.every((d) => swarm.tasks.find((x) => x.id === d)?.status === "done"));
       const inbox = swarm.messages.filter((m) => (m.to.length === 0 || m.to.includes(agent.id)) && !m.readBy.includes(agent.id));
       return {
-        swarm: { id: swarm.id, goal: swarm.goal, repo: swarm.repo, expectedAgents: swarm.expectedAgents },
+        swarm: { id: swarm.id, goal: swarm.goal, repo: swarm.repo, expectedAgents: swarm.expectedAgents, totalAgents: swarm.agents.length, activeAgents: activeAgents.length },
         me: { id: agent.id, name: agent.displayName, currentTaskId: agent.currentTaskId, branch: agent.branch, worktreePath: agent.worktreePath },
         agents: activeAgents.map((a) => ({ id: a.id, name: a.displayName, currentTaskId: a.currentTaskId, ageMs: t - a.lastSeenAt })),
         readyTasks: readyTasks.map((x) => ({ id: x.id, title: x.title, dependencies: x.dependencies, suggestedScopes: x.suggestedScopes })),
