@@ -9,6 +9,9 @@ export interface CommandDelivery {
   deliveredAt?: number;
   startedAt?: number;
   finishedAt?: number;
+  leaseExpiresAt?: number;
+  attempts?: number;
+  lastLeaseExpiredAt?: number;
   result?: string;
   error?: string;
 }
@@ -18,6 +21,7 @@ export interface CommandRecord {
   swarmId: string;
   prompt: string;
   label?: string;
+  requestId?: string;
   createdAt: number;
   targetAgentIds: string[];
   deliveries: Record<string, CommandDelivery>;
@@ -31,12 +35,16 @@ interface CommandDatabase {
 const EMPTY: CommandDatabase = { version: 1, commands: [] };
 const id = () => `cmd-${randomUUID().slice(0, 8)}`;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const finalStatus = (status: CommandDeliveryStatus) => status === "done" || status === "failed";
 
 export class CommandQueue {
   private state: CommandDatabase | null = null;
   private chain: Promise<void> = Promise.resolve();
 
-  constructor(private readonly filename: string) {}
+  constructor(
+    private readonly filename: string,
+    private readonly leaseMs = 90_000,
+  ) {}
 
   private async load(): Promise<CommandDatabase> {
     if (this.state) return this.state;
@@ -74,33 +82,58 @@ export class CommandQueue {
     }
   }
 
-  async enqueue(input: { swarmId: string; prompt: string; targetAgentIds: string[]; label?: string }): Promise<CommandRecord> {
+  private expireLeases(state: CommandDatabase, at = Date.now()): number {
+    let expired = 0;
+    for (const command of state.commands) {
+      for (const delivery of Object.values(command.deliveries)) {
+        if ((delivery.status === "delivered" || delivery.status === "running") && delivery.leaseExpiresAt && delivery.leaseExpiresAt <= at) {
+          delivery.status = "queued";
+          delivery.lastLeaseExpiredAt = at;
+          delete delivery.leaseExpiresAt;
+          delete delivery.finishedAt;
+          expired++;
+        }
+      }
+    }
+    return expired;
+  }
+
+  async enqueue(input: { swarmId: string; prompt: string; targetAgentIds: string[]; label?: string; requestId?: string }): Promise<CommandRecord> {
     if (!input.prompt.trim()) throw new Error("Command prompt is required");
     const targets = [...new Set(input.targetAgentIds.filter(Boolean))];
     if (!targets.length) throw new Error("At least one target agent is required");
     return this.transaction((state) => {
+      if (input.requestId) {
+        const existing = state.commands.find((item) => item.swarmId === input.swarmId && item.requestId === input.requestId);
+        if (existing) return structuredClone(existing);
+      }
       const command: CommandRecord = {
         id: id(),
         swarmId: input.swarmId,
         prompt: input.prompt.trim(),
         label: input.label?.trim() || undefined,
+        requestId: input.requestId?.trim() || undefined,
         createdAt: Date.now(),
         targetAgentIds: targets,
-        deliveries: Object.fromEntries(targets.map((agentId) => [agentId, { status: "queued" as const }])),
+        deliveries: Object.fromEntries(targets.map((agentId) => [agentId, { status: "queued" as const, attempts: 0 }])),
       };
       state.commands.push(command);
-      if (state.commands.length > 1000) state.commands.splice(0, state.commands.length - 1000);
+      if (state.commands.length > 2000) state.commands.splice(0, state.commands.length - 2000);
       return structuredClone(command);
     });
   }
 
   private async takeNext(swarmId: string, agentId: string): Promise<CommandRecord | null> {
     return this.transaction((state) => {
+      this.expireLeases(state);
       const command = state.commands.find((item) => item.swarmId === swarmId && item.deliveries[agentId]?.status === "queued");
       if (!command) return null;
       const delivery = command.deliveries[agentId];
+      const at = Date.now();
       delivery.status = "delivered";
-      delivery.deliveredAt = Date.now();
+      delivery.deliveredAt = at;
+      delivery.leaseExpiresAt = at + this.leaseMs;
+      delivery.attempts = (delivery.attempts ?? 0) + 1;
       return structuredClone(command);
     });
   }
@@ -118,14 +151,33 @@ export class CommandQueue {
 
   async ack(swarmId: string, agentId: string, commandId: string): Promise<CommandRecord> {
     return this.transaction((state) => {
+      this.expireLeases(state);
       const command = state.commands.find((item) => item.id === commandId && item.swarmId === swarmId);
       if (!command) throw new Error(`Unknown command: ${commandId}`);
       const delivery = command.deliveries[agentId];
       if (!delivery) throw new Error("Command is not targeted to this agent");
-      if (delivery.status === "done" || delivery.status === "failed") throw new Error(`Command already ${delivery.status}`);
+      if (finalStatus(delivery.status)) throw new Error(`Command already ${delivery.status}`);
+      const at = Date.now();
       delivery.status = "running";
-      delivery.deliveredAt ??= Date.now();
-      delivery.startedAt ??= Date.now();
+      delivery.deliveredAt ??= at;
+      delivery.startedAt ??= at;
+      delivery.leaseExpiresAt = at + this.leaseMs;
+      return structuredClone(command);
+    });
+  }
+
+  async renew(swarmId: string, agentId: string, commandId: string): Promise<CommandRecord> {
+    return this.transaction((state) => {
+      const command = state.commands.find((item) => item.id === commandId && item.swarmId === swarmId);
+      if (!command) throw new Error(`Unknown command: ${commandId}`);
+      const delivery = command.deliveries[agentId];
+      if (!delivery) throw new Error("Command is not targeted to this agent");
+      if (finalStatus(delivery.status)) throw new Error(`Command already ${delivery.status}`);
+      const at = Date.now();
+      delivery.status = "running";
+      delivery.deliveredAt ??= at;
+      delivery.startedAt ??= at;
+      delivery.leaseExpiresAt = at + this.leaseMs;
       return structuredClone(command);
     });
   }
@@ -136,10 +188,12 @@ export class CommandQueue {
       if (!command) throw new Error(`Unknown command: ${input.commandId}`);
       const delivery = command.deliveries[input.agentId];
       if (!delivery) throw new Error("Command is not targeted to this agent");
+      const at = Date.now();
       delivery.status = input.status;
-      delivery.deliveredAt ??= Date.now();
-      delivery.startedAt ??= Date.now();
-      delivery.finishedAt = Date.now();
+      delivery.deliveredAt ??= at;
+      delivery.startedAt ??= at;
+      delivery.finishedAt = at;
+      delete delivery.leaseExpiresAt;
       delivery.result = input.result;
       delivery.error = input.error;
       return structuredClone(command);
@@ -147,14 +201,15 @@ export class CommandQueue {
   }
 
   async list(swarmId?: string): Promise<CommandRecord[]> {
-    await this.chain;
-    const state = await this.load();
-    return structuredClone((swarmId ? state.commands.filter((item) => item.swarmId === swarmId) : state.commands).slice(-200));
+    return this.transaction((state) => {
+      this.expireLeases(state);
+      return structuredClone((swarmId ? state.commands.filter((item) => item.swarmId === swarmId) : state.commands).slice(-300));
+    });
   }
 
   async historyForAgent(swarmId: string, agentId: string): Promise<CommandRecord[]> {
     const commands = await this.list(swarmId);
-    return commands.filter((item) => Boolean(item.deliveries[agentId])).slice(-50);
+    return commands.filter((item) => Boolean(item.deliveries[agentId])).slice(-100);
   }
 
   async cancel(commandId: string): Promise<CommandRecord> {
@@ -162,11 +217,30 @@ export class CommandQueue {
       const command = state.commands.find((item) => item.id === commandId);
       if (!command) throw new Error(`Unknown command: ${commandId}`);
       for (const delivery of Object.values(command.deliveries)) {
-        if (delivery.status === "queued" || delivery.status === "delivered" || delivery.status === "running") {
+        if (!finalStatus(delivery.status)) {
           delivery.status = "failed";
           delivery.finishedAt = Date.now();
+          delete delivery.leaseExpiresAt;
           delivery.error = "Cancelled by operator";
         }
+      }
+      return structuredClone(command);
+    });
+  }
+
+  async retry(commandId: string, agentId?: string): Promise<CommandRecord> {
+    return this.transaction((state) => {
+      const command = state.commands.find((item) => item.id === commandId);
+      if (!command) throw new Error(`Unknown command: ${commandId}`);
+      const targets = agentId ? [agentId] : command.targetAgentIds;
+      for (const target of targets) {
+        const delivery = command.deliveries[target];
+        if (!delivery) throw new Error(`Command is not targeted to agent ${target}`);
+        if (delivery.status === "done") continue;
+        delivery.status = "queued";
+        delete delivery.leaseExpiresAt;
+        delete delivery.finishedAt;
+        delete delivery.error;
       }
       return structuredClone(command);
     });
