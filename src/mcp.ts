@@ -15,7 +15,7 @@ const auth = (args: any): AgentAuth => ({ swarmId: args.swarm_id, agentId: args.
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] });
 
 export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub, commands: CommandQueue): McpServer {
-  const server = new McpServer({ name: "antroswarm", version: "0.2.0" });
+  const server = new McpServer({ name: "antroswarm", version: "0.3.0" });
   const register = (name: string, description: string, schema: z.ZodObject<any>, handler: (args: any) => Promise<any>) => {
     server.registerTool(name, { description, inputSchema: schema.shape }, async (args: any) => {
       try { return text(await handler(args)); }
@@ -23,14 +23,14 @@ export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub, com
     });
   };
 
-  register("swarm_join", "Join or create a swarm. Each independent chat calls this once and receives its own logical agent credentials.", z.object({
-    swarm_id: z.string().min(1), display_name: z.string().optional(), goal: z.string().optional(), repo: z.string().optional(), expected_agents: z.number().int().positive().max(32).optional(),
-  }), async (a) => coordinator.join({ swarmId: a.swarm_id, displayName: a.display_name, goal: a.goal, repo: a.repo, expectedAgents: a.expected_agents }));
+  register("swarm_join", "Join or create a swarm. For reconnect-safe/idempotent joins, generate one random join_key per chat and reuse it on retries.", z.object({
+    swarm_id: z.string().min(1), display_name: z.string().optional(), goal: z.string().optional(), repo: z.string().optional(), expected_agents: z.number().int().positive().max(32).optional(), join_key: z.string().min(8).max(256).optional(),
+  }), async (a) => coordinator.join({ swarmId: a.swarm_id, displayName: a.display_name, goal: a.goal, repo: a.repo, expectedAgents: a.expected_agents, joinKey: a.join_key }));
 
   register("swarm_sync", "Get the compact shared coordination snapshot: teammates, ready tasks, unread inbox, locks, proposals and barriers. Call often.", z.object(authShape), async (a) => coordinator.sync(auth(a)));
   register("swarm_heartbeat", "Refresh this agent's presence without fetching the full snapshot.", z.object(authShape), async (a) => coordinator.heartbeat(auth(a)));
 
-  register("swarm_next_command", "Fetch the next queued Control Center command for this agent without waiting.", z.object(authShape), async (a) => {
+  register("swarm_next_command", "Fetch the next queued Control Center command for this agent without waiting. Delivery uses a retry lease so disconnected workers do not permanently lose commands.", z.object(authShape), async (a) => {
     await coordinator.getAgent(auth(a));
     return commands.next(a.swarm_id, a.agent_id, 0);
   });
@@ -41,6 +41,10 @@ export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub, com
   register("swarm_ack", "Acknowledge a delivered Control Center command and mark this agent as running it.", z.object({ ...authShape, command_id: z.string().min(1) }), async (a) => {
     await coordinator.getAgent(auth(a));
     return commands.ack(a.swarm_id, a.agent_id, a.command_id);
+  });
+  register("swarm_command_heartbeat", "Renew the execution lease for a long-running Control Center command. Call periodically during long work so it is not re-delivered after a disconnect timeout.", z.object({ ...authShape, command_id: z.string().min(1) }), async (a) => {
+    await coordinator.getAgent(auth(a));
+    return commands.renew(a.swarm_id, a.agent_id, a.command_id);
   });
   register("swarm_report", "Report a Control Center command as done or failed with a concise result.", z.object({ ...authShape, command_id: z.string().min(1), status: z.enum(["done", "failed"]), result: z.string().optional(), error: z.string().optional() }), async (a) => {
     await coordinator.getAgent(auth(a));
