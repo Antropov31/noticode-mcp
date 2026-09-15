@@ -11,6 +11,13 @@ const int = (value: string | undefined, fallback: number): number => {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 };
 
+export type WorkspaceMode = "worktree" | "shared";
+
+const workspaceMode = (value: string | undefined): WorkspaceMode => {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "shared" ? "shared" : "worktree";
+};
+
 export interface CloudConfig {
   host: string;
   port: number;
@@ -27,6 +34,7 @@ export interface RunnerConfig {
   runnerToken: string;
   workspace: string;
   runnerId: string;
+  workspaceMode: WorkspaceMode;
   baseRef: string;
   buildCommand: string;
   allowExec: boolean;
@@ -57,6 +65,7 @@ export function loadRunnerConfig(): RunnerConfig {
     runnerToken: process.env.ANTRO_RUNNER_TOKEN ?? "",
     workspace,
     runnerId: process.env.ANTRO_RUNNER_ID ?? "local-runner",
+    workspaceMode: workspaceMode(process.env.ANTRO_WORKSPACE_MODE),
     baseRef: process.env.ANTRO_BASE_REF ?? "origin/main",
     buildCommand: process.env.ANTRO_BUILD_COMMAND ?? (process.platform === "win32" ? "gradlew.bat clean build" : "./gradlew clean build"),
     allowExec: bool(process.env.ANTRO_RUNNER_ALLOW_EXEC, false),
