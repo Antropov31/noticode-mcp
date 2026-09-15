@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AgentAuth } from "./model.js";
 import { Coordinator } from "./coordinator.js";
+import { CommandQueue } from "./command-queue.js";
 import { RunnerHub } from "./runner/hub.js";
 
 const authShape = {
@@ -13,8 +14,8 @@ const authShape = {
 const auth = (args: any): AgentAuth => ({ swarmId: args.swarm_id, agentId: args.agent_id, agentToken: args.agent_token });
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] });
 
-export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub): McpServer {
-  const server = new McpServer({ name: "antroswarm", version: "0.1.0" });
+export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub, commands: CommandQueue): McpServer {
+  const server = new McpServer({ name: "antroswarm", version: "0.2.0" });
   const register = (name: string, description: string, schema: z.ZodObject<any>, handler: (args: any) => Promise<any>) => {
     server.registerTool(name, { description, inputSchema: schema.shape }, async (args: any) => {
       try { return text(await handler(args)); }
@@ -28,6 +29,27 @@ export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub): Mc
 
   register("swarm_sync", "Get the compact shared coordination snapshot: teammates, ready tasks, unread inbox, locks, proposals and barriers. Call often.", z.object(authShape), async (a) => coordinator.sync(auth(a)));
   register("swarm_heartbeat", "Refresh this agent's presence without fetching the full snapshot.", z.object(authShape), async (a) => coordinator.heartbeat(auth(a)));
+
+  register("swarm_next_command", "Fetch the next queued Control Center command for this agent without waiting.", z.object(authShape), async (a) => {
+    await coordinator.getAgent(auth(a));
+    return commands.next(a.swarm_id, a.agent_id, 0);
+  });
+  register("swarm_wait", "Long-poll for the next Control Center command. Use worker mode to call this repeatedly while the chat turn remains active.", z.object({ ...authShape, wait_ms: z.number().int().min(0).max(25_000).optional() }), async (a) => {
+    await coordinator.getAgent(auth(a));
+    return commands.next(a.swarm_id, a.agent_id, a.wait_ms ?? 20_000);
+  });
+  register("swarm_ack", "Acknowledge a delivered Control Center command and mark this agent as running it.", z.object({ ...authShape, command_id: z.string().min(1) }), async (a) => {
+    await coordinator.getAgent(auth(a));
+    return commands.ack(a.swarm_id, a.agent_id, a.command_id);
+  });
+  register("swarm_report", "Report a Control Center command as done or failed with a concise result.", z.object({ ...authShape, command_id: z.string().min(1), status: z.enum(["done", "failed"]), result: z.string().optional(), error: z.string().optional() }), async (a) => {
+    await coordinator.getAgent(auth(a));
+    return commands.report({ swarmId: a.swarm_id, agentId: a.agent_id, commandId: a.command_id, status: a.status, result: a.result, error: a.error });
+  });
+  register("swarm_command_history", "List recent Control Center commands targeted to this agent and their delivery status.", z.object(authShape), async (a) => {
+    await coordinator.getAgent(auth(a));
+    return commands.historyForAgent(a.swarm_id, a.agent_id);
+  });
 
   register("swarm_create_task", "Create a task with dependency IDs and suggested file scopes.", z.object({ ...authShape, title: z.string().min(1), description: z.string().optional(), dependencies: z.array(z.string()).optional(), suggested_scopes: z.array(z.string()).optional() }),
     async (a) => coordinator.createTask(auth(a), { title: a.title, description: a.description, dependencies: a.dependencies, suggestedScopes: a.suggested_scopes }));

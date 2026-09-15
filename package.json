@@ -1,6 +1,6 @@
 {
   "name": "antroswarm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared MCP coordination plane + outbound local runner for multiple independent coding-agent chats.",
   "type": "module",
   "bin": { "antroswarm": "./dist/src/index.js" },
@@ -9,7 +9,7 @@
     "dev": "tsx src/index.ts serve",
     "start": "node dist/src/index.js serve",
     "runner": "node dist/src/index.js runner",
-    "test": "tsx --test tests/coordinator.test.ts",
+    "test": "tsx --test tests/coordinator.test.ts tests/command-queue.test.ts",
     "check": "npm run build && npm test"
   },
   "keywords": ["mcp", "multi-agent", "coding-agent", "swarm", "chatgpt", "codex", "git-worktree"],
