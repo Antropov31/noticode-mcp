@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { minimatch } from "minimatch";
 import type { AgentAuth } from "./model.js";
 import { Coordinator } from "./coordinator.js";
 import { CommandQueue } from "./command-queue.js";
@@ -15,12 +16,39 @@ const auth = (args: any): AgentAuth => ({ swarmId: args.swarm_id, agentId: args.
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }] });
 
 export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub, commands: CommandQueue): McpServer {
-  const server = new McpServer({ name: "antroswarm", version: "0.3.0" });
+  const server = new McpServer({ name: "antroswarm", version: "0.4.0" });
   const register = (name: string, description: string, schema: z.ZodObject<any>, handler: (args: any) => Promise<any>) => {
     server.registerTool(name, { description, inputSchema: schema.shape }, async (args: any) => {
       try { return text(await handler(args)); }
       catch (error: any) { return { ...text({ error: error?.message ?? String(error) }), isError: true }; }
     });
+  };
+
+  const pickRunner = (runnerId?: string) => {
+    const list = runners.list();
+    const info = runnerId ? list.find((item) => item.id === runnerId) : list[0];
+    if (!info) throw new Error(runnerId ? `Runner ${runnerId} is offline` : "No local runner is connected");
+    return info;
+  };
+
+  const runnerContext = async (a: any) => {
+    const info = pickRunner(a.runner_id);
+    const agent = await coordinator.getAgent(auth(a));
+    const shared = info.capabilities.includes("shared-workspace");
+    if (shared) return { info, agent, shared, root: info.workspace };
+    if (!agent.worktreePath) throw new Error("Prepare a worktree first, or run the local runner with ANTRO_WORKSPACE_MODE=shared");
+    return { info, agent, shared, root: agent.worktreePath };
+  };
+
+  const requireSharedReservation = async (a: any, relativePath: string, shared: boolean) => {
+    if (!shared) return;
+    const snapshot = await coordinator.sync(auth(a));
+    const normalized = relativePath.replace(/\\/g, "/").replace(/^\.\//, "");
+    const own = snapshot.reservations.find((reservation: any) => reservation.agentId === a.agent_id
+      && reservation.patterns.some((pattern: string) => minimatch(normalized, pattern.replace(/\\/g, "/"), { dot: true })));
+    if (!own) {
+      throw new Error(`Shared workspace write requires an active swarm_reserve_paths reservation covering: ${normalized}`);
+    }
   };
 
   register("swarm_join", "Join or create a swarm. For reconnect-safe/idempotent joins, generate one random join_key per chat and reuse it on retries.", z.object({
@@ -66,7 +94,7 @@ export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub, com
   }), async (a) => coordinator.sendMessage(auth(a), { to: a.to, type: a.type, subject: a.subject, body: a.body, threadId: a.thread_id, taskId: a.task_id }));
   register("swarm_inbox", "Read unread durable messages. By default returned messages are marked read.", z.object({ ...authShape, mark_read: z.boolean().optional() }), async (a) => coordinator.inbox(auth(a), a.mark_read ?? true));
 
-  register("swarm_reserve_paths", "Reserve file/glob scopes with a TTL. Conflicting reservations by other agents are rejected.", z.object({
+  register("swarm_reserve_paths", "Reserve file/glob scopes with a TTL. Conflicting reservations by other agents are rejected. Shared workspace mode requires a covering reservation before every write/edit.", z.object({
     ...authShape, patterns: z.array(z.string().min(1)).min(1), task_id: z.string().optional(), ttl_ms: z.number().int().positive().optional(), note: z.string().optional(),
   }), async (a) => coordinator.reservePaths(auth(a), { patterns: a.patterns, taskId: a.task_id, ttlMs: a.ttl_ms, note: a.note }));
   register("swarm_release_paths", "Release one reservation or all reservations owned by this agent.", z.object({ ...authShape, reservation_id: z.string().optional() }), async (a) => coordinator.releasePaths(auth(a), a.reservation_id));
@@ -79,56 +107,68 @@ export function buildMcpServer(coordinator: Coordinator, runners: RunnerHub, com
   register("swarm_memory_put", "Write/update compact shared project memory such as architecture decisions or discovered constraints.", z.object({ ...authShape, key: z.string(), content: z.string(), tags: z.array(z.string()).optional() }), async (a) => coordinator.putMemory(auth(a), { key: a.key, content: a.content, tags: a.tags }));
   register("swarm_memory_search", "Search shared project memory by substring.", z.object({ ...authShape, query: z.string() }), async (a) => coordinator.searchMemory(auth(a), a.query));
 
-  register("runner_status", "List local outbound runners currently connected to the cloud MCP.", z.object(authShape), async (a) => { await coordinator.heartbeat(auth(a)); return runners.list(); });
-  register("runner_prepare_worktree", "Create/reuse a dedicated local git worktree for this agent's claimed task.", z.object({ ...authShape, task_id: z.string(), runner_id: z.string().optional() }), async (a) => {
+  register("runner_status", "List local outbound runners, including shared/worktree capabilities and their workspace roots.", z.object(authShape), async (a) => { await coordinator.heartbeat(auth(a)); return runners.list(); });
+  register("runner_workspace", "Show the active runner workspace root and whether it is shared or worktree mode.", z.object({ ...authShape, runner_id: z.string().optional() }), async (a) => {
+    await coordinator.heartbeat(auth(a));
+    const info = pickRunner(a.runner_id);
+    return { runnerId: info.id, path: info.workspace, mode: info.capabilities.includes("shared-workspace") ? "shared" : "worktree", capabilities: info.capabilities };
+  });
+  register("runner_prepare_worktree", "Compatibility helper. In shared mode it simply returns the common workspace; in worktree mode it creates/reuses a task worktree.", z.object({ ...authShape, task_id: z.string().optional(), runner_id: z.string().optional() }), async (a) => {
+    const info = pickRunner(a.runner_id);
+    if (info.capabilities.includes("shared-workspace")) {
+      await coordinator.heartbeat(auth(a));
+      return { path: info.workspace, mode: "shared", branch: null, existed: true };
+    }
+    if (!a.task_id) throw new Error("task_id is required in worktree mode");
     const agent = await coordinator.getAgent(auth(a));
     if (agent.currentTaskId !== a.task_id) throw new Error("Claim the task before creating its worktree");
     const result = await runners.execute("worktree.create", { swarmId: a.swarm_id, agentId: a.agent_id, taskId: a.task_id }, a.runner_id);
     await coordinator.setWorktree(auth(a), result.branch, result.path);
     return result;
   });
-  register("runner_list", "List files in this agent's worktree.", z.object({ ...authShape, path: z.string().optional(), depth: z.number().int().min(0).max(4).optional(), runner_id: z.string().optional() }), async (a) => {
-    const agent = await coordinator.getAgent(auth(a));
-    if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("fs.list", { root: agent.worktreePath, path: a.path ?? ".", depth: a.depth ?? 1 }, a.runner_id);
+  register("runner_list", "List files in the active runner workspace. Shared mode needs no task or worktree.", z.object({ ...authShape, path: z.string().optional(), depth: z.number().int().min(0).max(4).optional(), runner_id: z.string().optional() }), async (a) => {
+    const ctx = await runnerContext(a);
+    return runners.execute("fs.list", { root: ctx.root, path: a.path ?? ".", depth: a.depth ?? 1 }, a.runner_id);
   });
-  register("runner_read", "Read a UTF-8 file from this agent's worktree.", z.object({ ...authShape, path: z.string(), runner_id: z.string().optional() }), async (a) => {
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("fs.read", { root: agent.worktreePath, path: a.path }, a.runner_id);
+  register("runner_read", "Read a UTF-8 file from the active workspace. Returns sha256 so shared-mode edits can reject stale reads.", z.object({ ...authShape, path: z.string(), runner_id: z.string().optional() }), async (a) => {
+    const ctx = await runnerContext(a);
+    return runners.execute("fs.read", { root: ctx.root, path: a.path }, a.runner_id);
   });
-  register("runner_write", "Write a UTF-8 file in this agent's worktree. Active reservations owned by other agents are enforced before the write.", z.object({ ...authShape, path: z.string(), content: z.string(), runner_id: z.string().optional() }), async (a) => {
+  register("runner_write", "Write a UTF-8 file. In shared mode the agent must first reserve a covering path; expected_sha256 optionally blocks stale overwrites.", z.object({ ...authShape, path: z.string(), content: z.string(), expected_sha256: z.string().optional(), runner_id: z.string().optional() }), async (a) => {
+    const ctx = await runnerContext(a);
     await coordinator.assertWritable(auth(a), a.path);
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("fs.write", { root: agent.worktreePath, path: a.path, content: a.content }, a.runner_id);
+    await requireSharedReservation(a, a.path, ctx.shared);
+    return runners.execute("fs.write", { root: ctx.root, path: a.path, content: a.content, expectedSha256: a.expected_sha256 }, a.runner_id);
   });
-  register("runner_edit", "Exact-match edit a file in this agent's worktree with reservation enforcement.", z.object({ ...authShape, path: z.string(), search: z.string(), replace: z.string(), all: z.boolean().optional(), runner_id: z.string().optional() }), async (a) => {
+  register("runner_edit", "Exact-match edit with reservation enforcement. Shared mode requires a covering reservation; expected_sha256 optionally blocks stale edits.", z.object({ ...authShape, path: z.string(), search: z.string(), replace: z.string(), all: z.boolean().optional(), expected_sha256: z.string().optional(), runner_id: z.string().optional() }), async (a) => {
+    const ctx = await runnerContext(a);
     await coordinator.assertWritable(auth(a), a.path);
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("fs.edit", { root: agent.worktreePath, path: a.path, search: a.search, replace: a.replace, all: a.all ?? false }, a.runner_id);
+    await requireSharedReservation(a, a.path, ctx.shared);
+    return runners.execute("fs.edit", { root: ctx.root, path: a.path, search: a.search, replace: a.replace, all: a.all ?? false, expectedSha256: a.expected_sha256 }, a.runner_id);
   });
-  register("runner_git_status", "Run structured `git status` in this agent's worktree.", z.object({ ...authShape, runner_id: z.string().optional() }), async (a) => {
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("git.status", { root: agent.worktreePath }, a.runner_id);
+  register("runner_git_status", "Run git status in worktree mode. Disabled by a shared-mode runner.", z.object({ ...authShape, runner_id: z.string().optional() }), async (a) => {
+    const ctx = await runnerContext(a); if (ctx.shared) throw new Error("Git is disabled in shared workspace mode");
+    return runners.execute("git.status", { root: ctx.root }, a.runner_id);
   });
-  register("runner_git_diff", "Run git diff in this agent's worktree.", z.object({ ...authShape, cached: z.boolean().optional(), stat: z.boolean().optional(), runner_id: z.string().optional() }), async (a) => {
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("git.diff", { root: agent.worktreePath, cached: a.cached, stat: a.stat }, a.runner_id);
+  register("runner_git_diff", "Run git diff in worktree mode. Disabled by a shared-mode runner.", z.object({ ...authShape, cached: z.boolean().optional(), stat: z.boolean().optional(), runner_id: z.string().optional() }), async (a) => {
+    const ctx = await runnerContext(a); if (ctx.shared) throw new Error("Git is disabled in shared workspace mode");
+    return runners.execute("git.diff", { root: ctx.root, cached: a.cached, stat: a.stat }, a.runner_id);
   });
-  register("runner_git_commit", "Stage all changes and commit them in this agent's worktree.", z.object({ ...authShape, message: z.string().min(1), runner_id: z.string().optional() }), async (a) => {
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("git.commit", { root: agent.worktreePath, message: a.message }, a.runner_id);
+  register("runner_git_commit", "Commit in worktree mode. Disabled by a shared-mode runner.", z.object({ ...authShape, message: z.string().min(1), runner_id: z.string().optional() }), async (a) => {
+    const ctx = await runnerContext(a); if (ctx.shared) throw new Error("Git is disabled in shared workspace mode");
+    return runners.execute("git.commit", { root: ctx.root, message: a.message }, a.runner_id);
   });
-  register("runner_git_push", "Push this agent's worktree branch to origin.", z.object({ ...authShape, runner_id: z.string().optional() }), async (a) => {
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("git.push", { root: agent.worktreePath }, a.runner_id);
+  register("runner_git_push", "Push in worktree mode. Disabled by a shared-mode runner.", z.object({ ...authShape, runner_id: z.string().optional() }), async (a) => {
+    const ctx = await runnerContext(a); if (ctx.shared) throw new Error("Git is disabled in shared workspace mode");
+    return runners.execute("git.push", { root: ctx.root }, a.runner_id);
   });
-  register("runner_build", "Run the runner owner's configured build command in this agent's worktree.", z.object({ ...authShape, runner_id: z.string().optional(), timeout_ms: z.number().int().positive().optional() }), async (a) => {
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("build", { root: agent.worktreePath }, a.runner_id, a.timeout_ms);
+  register("runner_build", "Run the configured build command in the active workspace. Works in shared mode without a task/worktree.", z.object({ ...authShape, runner_id: z.string().optional(), timeout_ms: z.number().int().positive().optional() }), async (a) => {
+    const ctx = await runnerContext(a);
+    return runners.execute("build", { root: ctx.root }, a.runner_id, a.timeout_ms);
   });
-  register("runner_exec", "Opt-in generic command execution in this agent's worktree. Disabled by default on the local runner and prefix/control-token filtered when enabled.", z.object({ ...authShape, command: z.string(), runner_id: z.string().optional(), timeout_ms: z.number().int().positive().optional() }), async (a) => {
-    const agent = await coordinator.getAgent(auth(a)); if (!agent.worktreePath) throw new Error("Prepare a worktree first");
-    return runners.execute("exec", { root: agent.worktreePath, command: a.command }, a.runner_id, a.timeout_ms);
+  register("runner_exec", "Opt-in generic command execution in the active workspace. Disabled by default on the local runner and prefix/control-token filtered when enabled.", z.object({ ...authShape, command: z.string(), runner_id: z.string().optional(), timeout_ms: z.number().int().positive().optional() }), async (a) => {
+    const ctx = await runnerContext(a);
+    return runners.execute("exec", { root: ctx.root, command: a.command }, a.runner_id, a.timeout_ms);
   });
 
   return server;
