@@ -9,8 +9,8 @@ import { Coordinator } from "../src/coordinator.js";
 async function fixture() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "antroswarm-"));
   const coordinator = new Coordinator(new JsonStore(path.join(dir, "state.json")), 60_000, 60_000);
-  const a = await coordinator.join({ swarmId: "test", displayName: "A", goal: "ship", expectedAgents: 2 });
-  const b = await coordinator.join({ swarmId: "test", displayName: "B" });
+  const a = await coordinator.join({ swarmId: "test", displayName: "A", goal: "ship", expectedAgents: 2, joinKey: "fixture-agent-a" });
+  const b = await coordinator.join({ swarmId: "test", displayName: "B", joinKey: "fixture-agent-b" });
   const authA = { swarmId: "test", agentId: a.agentId, agentToken: a.agentToken };
   const authB = { swarmId: "test", agentId: b.agentId, agentToken: b.agentToken };
   return { coordinator, authA, authB };
@@ -54,4 +54,24 @@ test("mail is durable and scoped to recipient", async () => {
   assert.equal(inbox.length, 1);
   assert.equal(inbox[0].subject, "API");
   assert.equal((await coordinator.inbox(authB)).length, 0);
+});
+
+test("join_key makes retries idempotent instead of creating duplicate agents", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "antroswarm-join-"));
+  const coordinator = new Coordinator(new JsonStore(path.join(dir, "state.json")), 60_000, 60_000);
+  const first = await coordinator.join({ swarmId: "s", expectedAgents: 10, joinKey: "chat-session-123456" });
+  const retry = await coordinator.join({ swarmId: "s", expectedAgents: 10, joinKey: "chat-session-123456" });
+  assert.equal(retry.agentId, first.agentId);
+  assert.equal(retry.resumed, true);
+  const auth = { swarmId: "s", agentId: retry.agentId, agentToken: retry.agentToken };
+  const sync = await coordinator.sync(auth);
+  assert.equal(sync.swarm.totalAgents, 1);
+});
+
+test("expectedAgents is enforced as swarm capacity", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "antroswarm-capacity-"));
+  const coordinator = new Coordinator(new JsonStore(path.join(dir, "state.json")), 60_000, 60_000);
+  await coordinator.join({ swarmId: "s", expectedAgents: 2, joinKey: "agent-key-111" });
+  await coordinator.join({ swarmId: "s", joinKey: "agent-key-222" });
+  await assert.rejects(() => coordinator.join({ swarmId: "s", joinKey: "agent-key-333" }), /full/i);
 });
