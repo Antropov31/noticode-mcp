@@ -1,6 +1,6 @@
 {
   "name": "antroswarm",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shared MCP coordination plane + outbound local runner for multiple independent coding-agent chats.",
   "type": "module",
   "bin": { "antroswarm": "./dist/src/index.js" },
