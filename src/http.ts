@@ -65,6 +65,10 @@ export async function startCloud(config: CloudConfig): Promise<void> {
           acc[task.status] = (acc[task.status] ?? 0) + 1;
           return acc;
         }, {});
+        const messageCounts = swarm.messages.reduce<Record<string, number>>((acc, message) => {
+          acc[message.type] = (acc[message.type] ?? 0) + 1;
+          return acc;
+        }, {});
         return {
           id: swarm.id,
           goal: swarm.goal,
@@ -72,10 +76,32 @@ export async function startCloud(config: CloudConfig): Promise<void> {
           expectedAgents: swarm.expectedAgents,
           agents,
           onlineAgents: agents.filter((agent) => agent.online).length,
-          tasks: swarm.tasks.map((task) => ({ id: task.id, title: task.title, status: task.status, claimedBy: task.claimedBy, dependencies: task.dependencies })),
+          tasks: swarm.tasks.map((task) => ({
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            claimedBy: task.claimedBy,
+            dependencies: task.dependencies,
+            suggestedScopes: task.suggestedScopes,
+            updatedAt: task.updatedAt,
+          })),
           taskCounts,
           barriers: swarm.barriers,
           reservations: swarm.reservations,
+          proposals: swarm.proposals.slice(-100),
+          messages: swarm.messages.slice(-250).map((message) => ({
+            id: message.id,
+            from: message.from,
+            to: message.to,
+            type: message.type,
+            subject: message.subject,
+            body: message.body,
+            threadId: message.threadId,
+            taskId: message.taskId,
+            createdAt: message.createdAt,
+            readCount: message.readBy.length,
+          })),
+          messageCounts,
         };
       }));
       res.setHeader("cache-control", "no-store");
